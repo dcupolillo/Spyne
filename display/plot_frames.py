@@ -10,21 +10,44 @@ import numpy as np
 def animate_frames(
         frames: np.ndarray,
         frame_rate: float,
-        active_channels: list = None,
-        timestamps: bool = False,
-        norm: list or tuple = None
+        active_channels: list,
+        timestamps: bool,
+        norm: list or tuple or np.ndarray
 ) -> None:
     """
-    Shows frame sequence in a loop.
+    Display a sequence of frames as an animated loop.
 
-    Keyword args:
-        frames (list): input sequence of frames
-        frame_rate (float): rate of frame display
+    This function visualizes imaging frames using OpenCV, allowing for side-by-side
+    display of multiple active channels and optional timestamp annotations.
 
-    Optional:
-        active_channels (list): if specified,
-                                channels are displayed side by side
-        timestamps (bool): if specified, elapsed time will appear on video
+    Parameters
+    ----------
+    frames : np.ndarray
+        A sequence of frames to display, either as single-channel or multi-channel.
+        For multi-channel input, frames should have shape 
+        (n_frames, n_channels, height, width).
+    frame_rate : float
+        The display rate of the frames, in frames per second.
+    active_channels : list, optional
+        A list of channel indices to display. If specified, frames from these
+        channels are displayed side-by-side.
+    timestamps : bool, optional
+        If True, elapsed time is displayed on the frames during the animation.
+    norm : list | tuple | np.ndarray, optional
+        Normalization range for frame intensity values as [min, max]. If None,
+        the default range [0, 255] is used.
+
+    Returns
+    -------
+    None
+        The function displays frames in an OpenCV window. Press 'Q' to exit
+        the animation loop.
+
+    Notes
+    -----
+    - The function automatically normalizes frames to the 8-bit range for displaying.
+    - The display window is upscaled for better visibility.
+    - Timestamps are added to frames based on the provided frame rate.
 
     """
 
@@ -103,23 +126,45 @@ def save_frames(
         frames: np.ndarray,
         frame_rate: float,
         output_file: str or Path,
-        active_channels: list = None,
-        timestamps: bool = False,
-        norm: list or tuple or np.ndarray = None
+        active_channels: list,
+        timestamps: bool,
+        norm: list or tuple or np.ndarray
 ) -> None:
     """
-    Saves frame sequence as a video.
+    Save a sequence of imaging frames as a video file.
 
-    Keyword args:
-        frames (list): input sequence of frames
-        frame_rate (float): rate of frame display
-        output_file (str): path to saved video
+    This function takes a sequence of frames, optionally combines multiple
+    channels into side-by-side visualizations, normalizes intensity values, 
+    and saves the resulting video file. Timestamps can also be added to each 
+    frame.
 
-    Optional:
-        active_channels (list): if specified,
-                                channels are displayed side by side
-        timestamps (bool): if specified, elapsed time will appear on video
+    Parameters
+    ----------
+    frames : np.ndarray
+        A sequence of frames to save. For multi-channel input, frames should
+        have shape (n_frames, n_channels, height, width).
+    frame_rate : float
+        The frame rate (in frames per second) for the output video.
+    output_file : str | Path
+        The path to the output video file. The directory must exist.
+    active_channels : list, optional
+        A list of channel indices to display. If specified, frames from these
+        channels are combined side-by-side in the output. Default is None.
+    timestamps : bool, optional
+        If True, adds elapsed time annotations to each frame. Default is False.
+    norm : list | tuple | np.ndarray, optional
+        Normalization range for frame intensity values as [min, max]. 
+        Default is [0, 255].
 
+    Returns
+    -------
+    None
+        Saves the video to the specified path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the parent directory of `output_file` does not exist.
     """
 
     output_path = Path(output_file)
@@ -195,8 +240,49 @@ def save_single_frame(
         frame: np.ndarray,
         output_file: str,
         data_type: str,
-        norm: tuple or list or np.ndarray = None
+        norm: tuple or list or np.ndarray
 ) -> None:
+    """
+    Save a single frame as a normalized image file.
+
+    This function saves a single frame as an image file after applying
+    optional normalization and converting the frame to the specified data type.
+
+    Parameters
+    ----------
+    frame : np.ndarray
+        The frame data to save, typically a 2D NumPy array.
+    output_file : str
+        Path to save the output image. The parent directory must exist.
+    data_type : str
+        Target data type for the saved frame. Supported types are:
+        - 'int16': Signed 16-bit integer.
+        - 'uint16': Unsigned 16-bit integer.
+        - 'int8': Signed 8-bit integer.
+    norm : tuple | list | np.ndarray, optional
+        Normalization range as (min, max). If None, the range is derived from
+        the frame's minimum and maximum values.
+
+    Returns
+    -------
+    None
+        The function writes the image to the specified file path.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the parent directory of `output_file` does not exist.
+    ValueError
+        If an unsupported `data_type` is provided.
+
+    Notes
+    -----
+    - For 'int16' and 'uint16' data types, the frame is normalized to the 
+      specified range or to its original range if `norm` is not provided.
+    - For 'uint16', bitwise XOR is applied to convert the signed data to unsigned.
+    - For 'int8', the frame is normalized using OpenCV's `cv2.normalize` function.
+    - The output is saved using OpenCV's `cv2.imwrite`.
+    """
 
     output_path = Path(output_file)
 
@@ -241,83 +327,3 @@ def save_single_frame(
         raise ValueError('Invalid data_type')
 
     cv2.imwrite(output_file, frame_normalized)
-
-
-# def plot_sf(frame, ax=None, ):
-
-#     if not ax:
-#         fig, ax = plt.subplots()
-#         ax.set_aspect('equal')
-#         ax.invert_yaxis()
-
-#     if type(frame).__name__ == 'Roi':  # if it is single roi
-
-#         # frame is a Singlechannel object
-#         frame_normalized = cv2.normalize(frame.ch2.maxproj.frame,
-#                                          None, 0, 255,
-#                                          cv2.NORM_MINMAX,
-#                                          dtype=cv2.CV_8U)
-
-#         pixelresolutionXY = frame_normalized.shape
-#         centerXY = frame.roi_center
-
-#         pixToRefT = np.array(frame.roi_pixelToRef)
-#         sfToRefT = np.array(frame.roi_affine)
-
-#         # Create a meshgrid of frame pixels coordinates
-#         # and convert to list of [x, y] coordinates of n pixels
-#         x_coords = np.arange(pixelresolutionXY[1])
-#         y_coords = np.arange(pixelresolutionXY[0])
-#         meshgrid_ref = np.array(np.meshgrid(
-#             x_coords, y_coords)).T.reshape(-1, 2)  # list
-#         # of coordinates
-#         # of all pixels
-
-#         # Get intensity values as a 1D list
-#         intensity_values = frame_normalized.T.flatten()
-
-#         # Transform the meshgrid points
-#         pts_in_scanfield = transform(meshgrid_ref,
-#                                      sfToRefT, pixToRefT,
-#                                      centerXY, pixelresolutionXY)
-
-#         markersize = 40
-#         ax.scatter(pts_in_scanfield[:, 0], pts_in_scanfield[:, 1],
-#                    c=intensity_values, cmap='viridis',
-#                    s=markersize, marker='s')
-
-#     elif type(frame).__name__ == 'Movie':
-
-#         for roi in frame.roiList:
-
-#             # frame is a Singlechannel object
-#             frame_normalized = cv2.normalize(frame[roi].ch2.maxproj.frame,
-#                                              None, 0, 255,
-#                                              cv2.NORM_MINMAX,
-#                                              dtype=cv2.CV_8U)
-
-#             pixelresolutionXY = frame_normalized.shape
-#             centerXY = frame[roi].roi_center
-
-#             pixToRefT = np.array(frame[roi].roi_pixelToRef)
-#             sfToRefT = np.array(frame[roi].roi_affine)
-
-#             # Create a meshgrid of frame pixels coordinates
-#             # and convert to list of [x, y] coordinates of n pixels
-#             x_coords = np.arange(pixelresolutionXY[1])
-#             y_coords = np.arange(pixelresolutionXY[0])
-#             meshgrid_ref = np.array(np.meshgrid(
-#                 x_coords, y_coords)).T.reshape(-1, 2)
-
-#             # Get intensity values as a 1D list
-#             intensity_values = frame_normalized.T.flatten()
-
-#             # Transform the meshgrid points
-#             pts_in_scanfield = transform(meshgrid_ref,
-#                                          sfToRefT, pixToRefT,
-#                                          centerXY, pixelresolutionXY)
-
-#             markersize = 40
-#             ax.scatter(pts_in_scanfield[:, 0], pts_in_scanfield[:, 1],
-#                        c=intensity_values, cmap='binary_r',
-#                        s=markersize, marker='s')
