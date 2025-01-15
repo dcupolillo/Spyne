@@ -61,11 +61,12 @@ class ImagingDataset:
 
     def load_metadata(self):
 
-        metadata: list(dict) = []
+        metadata = []
 
-        rect_periods = [rect.rectangle_period
-                        for zplane in self.sf.neuComp
-                        for rect in zplane]
+        rect_periods = [
+            rect.rectangle_period
+            for zplane in self.sf.neuComp
+            for rect in zplane]
 
         unique_roifile_list = list(
             {file_path.parent: file_path
@@ -308,7 +309,7 @@ class Roi:
         # Crop out the corresponding roi
         self.roi = [data[
             :, :, roi_bounds[0]:roi_bounds[1], :int(pixel_resolution_xy[0])]
-                         for data in sweeps_data]
+            for data in sweeps_data]
 
         # Set roi metadata as attributes
         for key, value in self.roi_metadata.items():
