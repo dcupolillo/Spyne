@@ -718,9 +718,10 @@ class Channel:
         return self.channel.shape
 
     def show(
-            self,
-            timestamps: bool = False,
-            norm: list or tuple or np.ndarray = None):
+        self,
+        timestamps: bool = False,
+        norm: list or tuple or np.ndarray = None
+    ) -> None:
         """
         Visualize the frame sequence for the channel.
 
@@ -740,7 +741,7 @@ class Channel:
         return animate_frames(
             self.channel,
             self.frame_rate,
-            active_channels=None
+            active_channels=None,
             timestamps=timestamps,
             norm=norm)
 
@@ -769,6 +770,7 @@ class Channel:
 
         if not output_file:
             output_file = self.filename.with_suffix('.avi')
+
         print(f'Saved! at {output_file}')
 
         return save_frames(
