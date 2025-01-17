@@ -62,7 +62,7 @@ class DatasetSegmenter:
             dataset: object,
             segmentation_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
-                "models/model_240909_2.h5"),
+                r"models/model_240909_2.h5"),
             spine_threshold: float = 0.3,
             dendrite_threshold: float = 0.7,
             mask_size: int = 3,
@@ -295,7 +295,7 @@ class DatasetSegmenter:
         - Timeseries data collection extracts relevant information (e.g., z-scores, dF/F)
         for all spines detected during segmentation.
         """
-        # TODO : add a total n_spine attribute?
+
         (
             segmenters,
             self.spines_data,
