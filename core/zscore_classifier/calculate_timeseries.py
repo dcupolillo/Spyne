@@ -149,32 +149,6 @@ def dFF(
     return dff
 
 
-# def get_time_series(
-#         spine: object,
-#         sweep_index: int,
-# ) -> Union[np.ndarray, cp.ndarray]:
-#     """
-#     Generate a time series array for a given spine and sweep index.
-
-#     Parameters
-#     ----------
-#     spine : object
-#         The spine object containing the data.
-#     sweep_index : int
-#         The index of the sweep.
-#     use_gpu : bool
-#         Whether to use GPU acceleration with cupy.
-
-#     Returns
-#     -------
-#     time_series : np.ndarray or cp.ndarray
-#         The generated time series array, with each element representing
-#         the time point corresponding to a frame index.
-#     """
-
-#     return np.array([frame_index / spine.frame_rate
-#                      for frame_index in range(spine.n_frames)])
-
 def get_time_series(
         spine: object,
         sweep_index: int,
@@ -200,32 +174,6 @@ def get_time_series(
         tf.range(spine.n_frames, dtype=tf.float32) /
         spine.frame_rate, tf.float32)
 
-
-# def z_score(
-#         spine: object,
-#         sweep_index: int,
-# ) -> Union[np.ndarray, cp.ndarray]:
-#     """
-#     Calculate the z-score of the dFF trace for a given sweep index.
-
-#     Parameters
-#     ----------
-#     sweep_index : int
-#         The index of the sweep.
-#     use_gpu : bool, optional
-#         Whether to use GPU acceleration with cupy. Default is False.
-
-#     Returns
-#     -------
-#     z_scores : np.ndarray or cp.ndarray
-#         The calculated z-scores.
-#     """
-
-#     dff = np.array(spine.f(sweep_index))
-#     mean = np.mean(dff)
-#     st_dev = np.std(dff)
-
-#     return (dff - mean) / st_dev
 
 def z_score(
         spine: object,

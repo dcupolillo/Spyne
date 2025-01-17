@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 
 
 def collect_centroid_fov(
-        data: list[dict]
-) -> list[tuple[float, float]]:
+        data: list
+) -> list:
     """
     Collects all 'centroid_fov' tuples from a 2D list of dictionaries
     into a 1D list.
@@ -33,11 +33,11 @@ def plot_all_spines(
         all_spines: list,
         spine_size: int,
         fontsize: int,
-        spine_color: str or tuple[float, float, float],
+        spine_color: str,
         ax: plt.Axes = None,
 ) -> None:
     """
-    Plot all spine centroids from the segmenter.
+    Plot all spine centroids from the segmenter as scattered dots.
 
     Parameters
     ----------
@@ -139,13 +139,61 @@ def plot_all_zscore_heatmap(
         all_spines: object,
         input_type: str,
         average: bool,
-        sort: bool):
+        sort: bool,
+        sort_window: tuple,
+        cmap: str,
+) -> None:
+    """
+    Plot heatmaps of z-scores for all spines in the dataset.
+
+    Parameters
+    ----------
+    all_spines : object
+        Dataset object containing spine and dendrite data, including z-scores 
+        and timestamps for BLA and CA3 regions.
+    input_type : str, optional
+        Specifies the source of z-scores to plot. Valid options are:
+        - "BLA" for z-scores of BLA spines.
+        - "CA3" for z-scores of CA3 spines.
+        - None (default) to plot both BLA and CA3 spines in separate subplots.
+    average : bool, optional
+        If True, plot the average z-score across sweeps for each spine. 
+        Default is False, which shows all sweeps.
+    sort : bool, optional
+        If True, sort spines based on the average z-score in the specified 
+        time window (`sort_window`). Default is False.
+    sort_window : tuple, optional
+        Time window (start, end) for calculating the sorting criterion, where 
+        the indices refer to the time points in the z-score traces. 
+        Default is (16, 21).
+
+    Returns
+    -------
+    tuple or None
+        - If `input_type` is None and `sort` is True, returns a tuple of sorted
+          indices for BLA and CA3 spines: `(sorted_indices_BLA, sorted_indices_CA3)`.
+        - If `input_type` is "BLA" or "CA3" and `sort` is True, returns the 
+          sorted indices for the specified input type.
+        - If `sort` is False, returns None and directly plots the heatmap(s).
+
+    Notes
+    -----
+    - This function generates heatmaps of z-scores over time for spines, with 
+      color intensity representing the magnitude of the z-scores.
+    - Sorting is based on the mean z-score within the specified time window.
+    - When `average` is True, each spine is represented by its averaged z-score 
+      trace. Otherwise, all sweeps are displayed.
+    - If `input_type` is None, heatmaps for BLA and CA3 spines are displayed in 
+      separate subplots.
+    """
+
+    start, end = sort_window
 
     if not input_type:
-        zscore_BLA = all_spines.batch_z_scores_BLA
-        ts_BLA = all_spines.batch_ts_BLA
-        zscore_CA3 = all_spines.batch_z_scores_CA3
-        ts_CA3 = all_spines.batch_ts_CA3
+        zscore_BLA = all_spines.zscores_BLA
+        ts_BLA = all_spines.ts_BLA
+        zscore_CA3 = all_spines.zscores_CA3
+        ts_CA3 = all_spines.ts_CA3
 
         if average:
             processed_zscores_BLA = np.array(
@@ -167,18 +215,21 @@ def plot_all_zscore_heatmap(
             processed_zscores_CA3 = np.concatenate(zscore_CA3, axis=0)
             processed_timestamps_CA3 = np.concatenate(
                 [np.array(ts) for ts in ts_CA3], axis=0)
-            y_label = f"Sweeps of {len(all_spines.batch_spines_data)} spines"
+            y_label = f"Sweeps of {len(all_spines.spines_data)} spines"
 
         if sort:
+            if not sort_window:
+                raise AttributeError("sort_window not defined.")
+
             sorting_values_BLA = np.array(
-                [np.mean(trace[16:21]) for trace in processed_zscores_BLA])
+                [np.mean(trace[start:end]) for trace in processed_zscores_BLA])
             sorted_indices_BLA = np.argsort(sorting_values_BLA)
             processed_zscores_BLA = processed_zscores_BLA[sorted_indices_BLA]
             processed_timestamps_BLA = processed_timestamps_BLA[
                 sorted_indices_BLA]
 
             sorting_values_CA3 = np.array(
-                [np.mean(trace[16:21]) for trace in processed_zscores_CA3])
+                [np.mean(trace[start:end]) for trace in processed_zscores_CA3])
             sorted_indices_CA3 = np.argsort(sorting_values_CA3)
             processed_zscores_CA3 = processed_zscores_CA3[sorted_indices_CA3]
             processed_timestamps_CA3 = processed_timestamps_CA3[
@@ -189,7 +240,7 @@ def plot_all_zscore_heatmap(
         BLA = ax_zscore[0].imshow(
             processed_zscores_BLA,
             aspect='auto',
-            cmap='viridis',
+            cmap=cmap,
             extent=[np.min(processed_timestamps_BLA),
                     np.max(processed_timestamps_BLA),
                     0,
@@ -199,7 +250,7 @@ def plot_all_zscore_heatmap(
         CA3 = ax_zscore[1].imshow(
             processed_zscores_CA3,
             aspect='auto',
-            cmap='viridis',
+            cmap=cmap,
             extent=[np.min(processed_timestamps_CA3),
                     np.max(processed_timestamps_CA3),
                     0,
@@ -207,6 +258,7 @@ def plot_all_zscore_heatmap(
             interpolation='none')
 
         for ax in ax_zscore:
+
             ax.axvline(
                 x=1.0,
                 ymin=1,
@@ -215,22 +267,22 @@ def plot_all_zscore_heatmap(
                 lw=1,
                 clip_on=False)
 
+            if average:
+                ax.set_yticks([0, len(processed_zscore_BLA)])
+
         plt.colorbar(BLA, ax=ax_zscore[0], label='Z-score')
         plt.colorbar(CA3, ax=ax_zscore[1], label='Z-score')
         ax_zscore[0].set_xlabel('Time (s)')
         ax_zscore[0].set_ylabel(y_label)
         ax_zscore[0].invert_yaxis()
 
-        if sort:
-            return sorted_indices_BLA, sorted_indices_CA3
-
     else:
         if input_type == 'BLA':
-            zscore = all_spines.batch_z_scores_BLA
-            ts = all_spines.batch_ts_BLA
+            zscore = all_spines.zscores_BLA
+            ts = all_spines.ts_BLA
         elif input_type == 'CA3':
-            zscore = all_spines.batch_z_scores_CA3
-            ts = all_spines.batch_ts_CA3
+            zscore = all_spines.zscores_CA3
+            ts = all_spines.ts_CA3
         else:
             raise ValueError(
                 "Invalid input_type. Must be 'BLA', 'CA3', or None.")
@@ -245,11 +297,11 @@ def plot_all_zscore_heatmap(
             processed_zscores = np.concatenate(zscore, axis=0)
             processed_timestamps = np.concatenate(
                 [np.array(t) for t in ts], axis=0)
-            y_label = f"Sweeps of {len(all_spines.batch_spines_data)} spines"
+            y_label = f"Sweeps of {len(all_spines.spines_data)} spines"
 
         if sort:
             sorting_values = np.array(
-                [np.mean(trace[16:21]) for trace in processed_zscores])
+                [np.mean(trace[start:end]) for trace in processed_zscores])
             sorted_indices = np.argsort(sorting_values)
             processed_zscores = processed_zscores[sorted_indices]
             processed_timestamps = processed_timestamps[sorted_indices]
@@ -258,7 +310,7 @@ def plot_all_zscore_heatmap(
         img = ax.imshow(
             processed_zscores,
             aspect='auto',
-            cmap='viridis',
+            cmap=cmap,
             extent=[np.min(processed_timestamps),
                     np.max(processed_timestamps),
                     0,
@@ -273,12 +325,13 @@ def plot_all_zscore_heatmap(
             lw=1,
             clip_on=False)
 
+        if average:
+            ax.set_yticks([0, len(processed_zscores)])
+
         plt.colorbar(img, ax=ax, label='Z-score')
         ax.set_xlabel('Time (s)')
         ax.set_ylabel(y_label)
         ax.invert_yaxis()
-
-    # return processed_zscores_BLA
 
 
 def plot_events_spines(

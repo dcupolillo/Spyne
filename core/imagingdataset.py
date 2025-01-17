@@ -33,12 +33,14 @@ class ImagingDataset:
     Files includes grouped coplanar ROIs, stacked in vertical.
     Cropping to individual ROIs is provided in the Roi class.
 
+    Depends on file organizer neuronpath.
+
     Example
     -------
     >>> import spyne
     >>> from neuronpath.path import neuronpath
     >>> paths = neuronpath('YYMMDD', cell_number)
-    >>> dataset = ImagingDataset(paths)
+    >>> dataset = spyne.ImagingDataset(paths)
     >>> print(f"Number of ROIs: {len(dataset)}")
     """
 
@@ -563,6 +565,7 @@ class Sweep:
     ) -> None:
         """
         Save the sweep data as a video file.
+        Exploits OpenCV tools.
 
         Parameters
         ----------
@@ -724,6 +727,7 @@ class Channel:
     ) -> None:
         """
         Visualize the frame sequence for the channel.
+        Exploits OpenCV tools.
 
         Parameters
         ----------
@@ -753,6 +757,7 @@ class Channel:
     ) -> None:
         """
         Save the frame sequence of the channel as a video file.
+        Exploits OpenCV tools.
 
         Parameters
         ----------
@@ -910,7 +915,7 @@ class Frame:
 
     def save(
             self,
-            output_file: str or Path = None,
+            output_file: str or Path = None,  # type: ignore
             data_type: str = None,
             norm: tuple or list or np.ndarray = None
     ) -> None:
@@ -933,6 +938,7 @@ class Frame:
 
         if not output_file:
             output_file = self.filename.with_suffix('.tif')
+
         print(f'Saved! at {output_file}')
 
         if not data_type:
