@@ -9,11 +9,6 @@ from tqdm import tqdm
 from itertools import chain
 from functools import cache
 import matplotlib.pyplot as plt
-import torch
-import random
-
-from spyne.core.timeseries.calculate_timeseries import (
-    dFF, get_time_series, z_score)
 
 from spyne.display.events import (
     plot_spine_pixel_annotation, plot_spine_calcium_traces,
@@ -21,8 +16,6 @@ from spyne.display.events import (
 from spyne.display.plot_segmenter import (
     plot_all_spines, plot_events_spines, plot_all_zscore_heatmap,
     spine_sholl)
-from spyne.core.utils.detect_event import (
-    is_calcium_event, )
 
 from spyne.core.semantic_segmentation.pipeline import semantic_segmentation_pipeline
 from spyne.core.semantic_segmentation.padding import pad_image
@@ -31,10 +24,8 @@ from spyne.core.semantic_segmentation.post_processing import process_predictions
 from spyne.core.zscore_classifier.timeseries_pipeline import collect_timeseries
 from spyne.core.zscore_classifier.inference import (
     detect_calcium_events, binarize_calcium_events_array)
-
-from spyne.neuralnetwork.zscore_decoder.network import ZScoreNN
-from spyne.neuralnetwork.zscore_decoder.utils import set_device
-from spyne.core.zscore_classifier.classifier import load_classifier
+from spyne.core.zscore_classifier.calculate_timeseries import (
+    dFF, get_time_series, z_score)
 
 
 class DatasetSegmenter:
