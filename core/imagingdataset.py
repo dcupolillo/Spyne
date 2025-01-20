@@ -7,18 +7,15 @@ import tifffile
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from functools import cache
-from scipy.ndimage import median_filter
+
 from skimage.util import img_as_uint
 import skimage
-
 import ROIpy as rp
 from spyne.display.plot_frames import (
     animate_frames, save_frames, save_single_frame)
-from spyne.core.utils.movie_utils import rows_deviation, modify_frames
 from spyne.core.utils.filters import median, gaussian
-from spyne.core.utils.pyabf_adc import get_digital_output_list, get_pmt_gate
+from spyne.core.utils.load import load_metadata_from_tiff, load_imaging_data_from_tiff
 from neuronpath.path import NeuronPath
-from tqdm import tqdm
 
 
 class ImagingDataset:
@@ -104,6 +101,8 @@ class ImagingDataset:
         Load metadata for all ROIs.
 
         This method extracts information from acquisition files.
+        Uses load_metadata_from_tiff() function to return
+        n_rois and structured metadata.
 
         Returns
         -------
@@ -111,153 +110,20 @@ class ImagingDataset:
             A list of metadata dictionaries for all ROIs.
         """
 
-        metadata = []
-
-        rect_periods = [
-            rect.rectangle_period
-            for zplane in self.sf.neuComp
-            for rect in zplane]
-
-        unique_roifile_list = list(
-            {file_path.parent: file_path
-             for file_path in self.file_list}.values())
-
-        z_values = sorted(
-            {int(file_path.parent.name[1:])
-             for file_path in self.file_list})
-        z_index_map = {z: idx for idx, z in enumerate(z_values)}
-
-        grouped_sweeps = [[] for _ in range(len(z_values))]
-
-        for file_path in self.file_list:
-
-            z_value = int(file_path.parent.name[1:])
-            z_index = z_index_map[z_value]
-            grouped_sweeps[z_index].append(file_path)
-
-        self.n_sweeps = [len(n) for n in grouped_sweeps]
-
-        self.coplanar_n = [rect.z_ind
-                           for zplane in self.sf.neuComp
-                           for rect in zplane]
-
-        # Retrieve metadata
-        n_roi = 0
-        coplanar_dict = {}
-
-        for n, file_path in enumerate(
-                tqdm(unique_roifile_list, desc="Loading metadata")):
-
-            abf_file = self.abf_file_list[n]
-            adc_list = get_digital_output_list(abf_file)
-
-            with tifffile.TiffFile(file_path) as tif:
-
-                scanimage_metadata = tif.scanimage_metadata
-
-                frame_data = scanimage_metadata['FrameData']
-                roigroup_data = (
-                    scanimage_metadata['RoiGroups']['imagingRoiGroup'])
-                rois = roigroup_data['rois']
-
-                rois = [rois] if isinstance(rois, dict) else rois
-
-                for roi in rois:
-
-                    z = float(roi['name'].split(",")[0].split(" = ")[-1])
-
-                    scanfield = roi['scanfields']
-                    center_xy = scanfield['centerXY']
-                    size_xy = scanfield['sizeXY']
-                    pixel_resolution_xy = scanfield['pixelResolutionXY']
-
-                    center_xy_ref = np.dot(
-                        [0.5, 0.5],
-                        np.array(scanfield['affine']).T[:-1, :])
-
-                    translate = np.array(
-                        [[1, 0, center_xy[0] - center_xy_ref[0]],
-                         [0, 1, center_xy[1] - center_xy_ref[1]],
-                         [0, 0, 1]])
-
-                    resolution = [
-                        size_xy[0] / pixel_resolution_xy[0],
-                        size_xy[1] / pixel_resolution_xy[1]]
-
-                    if z not in coplanar_dict:
-                        coplanar_dict[z] = []
-                    coplanar_dict[z].append(n_roi)
-
-                    metadata.append({
-                        'objective resolution':
-                            frame_data["SI.objectiveResolution"],
-                        'affine': scanfield['affine'],
-                        'translate': translate,
-                        'center_xy': center_xy,
-                        'center_xy_ref': center_xy_ref,
-                        'pixel_resolution_xy': pixel_resolution_xy,
-                        'pixel_to_ref_transform':
-                            scanfield['pixelToRefTransform'],
-                        'roi_uuid': scanfield['roiUuid'],
-                        'roi_uuid_int64': scanfield['roiUuiduint64'],
-                        'rotation_degrees': scanfield['rotationDegrees'],
-                        'size_xy': scanfield['sizeXY'],
-                        'resolution': resolution,
-                        'z': z,
-                        'z_ind': n,
-                        'n_roi': n_roi,
-                        'n_sweeps': self.n_sweeps[n],
-                        'n_frames':
-                            frame_data['SI.hStackManager.framesPerSlice'],
-                        'frame_rate':
-                            frame_data['SI.hRoiManager.scanFrameRate'],
-                        'rectangle_period': rect_periods[n_roi],
-                        'flyto':
-                            frame_data['SI.hScan2D.flytoTimePerScanfield'],
-                        'flyback':
-                            frame_data['SI.hScan2D.flybackTimePerFrame'],
-                        'adc_list': [adc for adc in adc_list],
-                        'ch_active': frame_data['SI.hChannels.channelsActive'],
-                        'LUT': frame_data['SI.hChannels.channelLUT'],
-                        'offset': frame_data['SI.hChannels.channelOffset'],
-                        'subtract_offset':
-                            frame_data['SI.hChannels.channelSubtractOffset'],
-                        'input_range':
-                            frame_data['SI.hChannels.channelInputRange'],
-                        'median_filter_kernel_size': self.median_filter_kernel_size,
-                    })
-
-                    n_roi += 1
-
-        for meta in metadata:
-            z = meta['z']
-            meta['coplanar_roi_n'] = coplanar_dict[z]
-
-        grouped_metadata = [[] for _ in range(len(z_values))]
-
-        for meta in metadata:
-            grouped_metadata[meta['z_ind']].append(meta)
-
-        for group in grouped_metadata:
-            start_y = 0
-            for meta in group:
-                end_y = start_y + meta['pixel_resolution_xy'][1]
-                meta['roi_bounds'] = [start_y, end_y]
-                start_y = end_y
-
-        self.n_rois = len(metadata)
+        self.n_rois, metadata = load_metadata_from_tiff(self)
         self.roi_list = np.arange(self.n_rois)
 
-        return [meta
-                for group in grouped_metadata
-                for meta in group]
+        return metadata
 
     def _load_data(self):
         """
         Load and process imaging data.
 
-        Applies gating-PMT artifact correction and a 3D median filter to the
-        raw imaging data.
+        Uses load_imaging_data_from_tiff() function
+        to load the raw .tiff data and perform some
+        initial processing, including:
+        - gating-PMT artifact correction 
+        - 3D median filter 
 
         Returns
         -------
@@ -265,61 +131,10 @@ class ImagingDataset:
             A list of processed imaging data arrays.
         """
 
-        data = [None] * len(self.file_list)
+        return load_imaging_data_from_tiff(self)
 
-        for n, file_path in enumerate(tqdm(
-                self.file_list, desc="Loading data")):
-
-            # raw data are dtype signed int16
-            raw_frames = tifffile.imread(file_path)
-
-            # Negative values clipped as 0
-            # FIXME: fix the range
-            frames = raw_frames.copy()
-            # frames = img_as_uint(frames)
-
-            # Correct gating-PMT black stripe
-            # Dectect deviating rows
-            deviation_channel1 = rows_deviation(
-                frames[:, 0, :, :], threshold_factor=3, plot=False)
-            deviation_channel2 = rows_deviation(
-                frames[:, 1, :, :], threshold_factor=3, plot=False)
-
-            deviating_rows = {}
-
-            for frame in set(deviation_channel1.keys()).union(
-                    set(deviation_channel2.keys())):
-
-                rows1 = deviation_channel1.get(frame, [])
-                rows2 = deviation_channel2.get(frame, [])
-                deviating_rows[frame] = sorted(set(rows1 + rows2))
-
-            sorted_deviating_rows = dict(sorted(deviating_rows.items()))
-
-            consecutive_deviating_rows = {}
-            frame_numbers = list(sorted_deviating_rows.keys())
-
-            for frame_number in frame_numbers:
-                consecutive_deviating_rows[frame_number] = (
-                    sorted_deviating_rows[frame_number])
-
-            modified_frames = modify_frames(
-                frames, consecutive_deviating_rows)
-
-            # Apply 3D median filter
-            filtered_frames = modified_frames.copy()
-            filtered_frames[:, 0, :, :] = median_filter(
-                filtered_frames[:, 0, :, :],
-                size=self.median_filter_kernel_size,
-                mode='wrap')
-            filtered_frames[:, 1, :, :] = median_filter(
-                filtered_frames[:, 1, :, :],
-                size=self.median_filter_kernel_size,
-                mode='wrap')
-
-            data[n] = modified_frames
-
-        return data
+    def __len__(self):
+        return len(self.roi_list)
 
     def __getattr__(self, name: str):
         return self.__dict__[f"_{name}"]
@@ -333,9 +148,6 @@ class ImagingDataset:
                 f'Roi {roi_index} out of range {len(self.roi_list)}')
 
         return self.get_roi(roi_index)
-
-    def __len__(self):
-        return len(self.roi_list)
 
     @cache
     def get_roi(self, roi_index: int) -> object:
