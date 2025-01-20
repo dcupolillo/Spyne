@@ -332,7 +332,8 @@ def plot_events_spines(
 
     ax.set_xlabel('X coordinate', fontsize=fontsize)
     ax.set_ylabel('Y coordinate', fontsize=fontsize)
-    ax.set_aspect('equal', adjustable='box')
+    ax.set_aspect('equal')
+    ax.tick_params("both", labelsize=fontsize)
 
     scatter = ax.scatter(
         [c[0] for c in nonzero_centroids],  # X coordinates of selected spines
@@ -346,7 +347,10 @@ def plot_events_spines(
 
     if show_cmap:
         cbar = plt.colorbar(
-            scatter, ax=ax, label='Number of Events', shrink=0.8)
+            scatter,
+            ax=ax,
+            label='Number of Events',
+            shrink=0.8)
 
         cbar.ax.tick_params(labelsize=fontsize)
         cbar.set_label('Number of Events', fontsize=fontsize)

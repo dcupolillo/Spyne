@@ -233,14 +233,14 @@ class DatasetSegmenter:
                 except FileNotFoundError:
                     setattr(self, attr, [])
 
-        if self.calcium_events_binary_BLA:
+        if self.calcium_events_binary_BLA.size > 0:
             n_spines_BLA = 0
             for spine in self.calcium_events_binary_BLA:
                 if sum(spine) > 0:
                     n_spines_BLA += 1
             self.n_spines_BLA = n_spines_BLA
 
-        if self.calcium_events_binary_CA3:
+        if self.calcium_events_binary_CA3.size > 0:
             n_spines_CA3 = 0
             for spine in self.calcium_events_binary_CA3:
                 if sum(spine) > 0:
@@ -514,7 +514,7 @@ class DatasetSegmenter:
             n_event_threshold: int = 0,
             spine_size: int = 20,
             ax=None,
-            fontsize: int = 10,
+            fontsize: int = 14,
             cmap: str = 'viridis',
             show_cmap: bool = True,
     ) -> None:
