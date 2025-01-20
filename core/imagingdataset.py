@@ -3,13 +3,9 @@
 
 from pathlib import Path
 import numpy as np
-import tifffile
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from functools import cache
-
-from skimage.util import img_as_uint
-import skimage
 import ROIpy as rp
 from spyne.display.plot_frames import (
     animate_frames, save_frames, save_single_frame)

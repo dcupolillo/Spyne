@@ -1,6 +1,8 @@
 from tqdm import tqdm
 import tifffile
 import numpy as np
+from skimage.util import img_as_uint
+import skimage
 from scipy.ndimage import median_filter
 from spyne.core.utils.pyabf_adc import get_digital_output_list
 from spyne.core.utils.movie_utils import rows_deviation, modify_frames
@@ -154,7 +156,8 @@ def load_metadata_from_tiff(
 
 
 def load_imaging_data_from_tiff(
-        dataset_instance: object
+        dataset_instance: object,
+        threshold_factor: int = 3,
 ) -> np.ndarray:
 
     data = [None] * len(dataset_instance.file_list)
@@ -173,9 +176,9 @@ def load_imaging_data_from_tiff(
         # Correct gating-PMT black stripe
         # Dectect deviating rows
         deviation_channel1 = rows_deviation(
-            frames[:, 0, :, :], threshold_factor=3, plot=False)
+            frames[:, 0, :, :], threshold_factor=threshold_factor, plot=False)
         deviation_channel2 = rows_deviation(
-            frames[:, 1, :, :], threshold_factor=3, plot=False)
+            frames[:, 1, :, :], threshold_factor=threshold_factor, plot=False)
 
         deviating_rows = {}
 

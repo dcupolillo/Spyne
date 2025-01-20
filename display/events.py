@@ -12,39 +12,136 @@ from spyne.neuralnetwork.spine_segmentation.spine_segmentation import (
 from spyne.core.utils.utils import transform
 
 
+def _format_axes(
+        axes: plt.Axes or np.ndarray,
+        fontsize: int = 14,
+        hide_axes: list = ["top", "right"],
+        offset_axes: list = ["bottom", "left"],
+        offset: int = 20,
+        set_aspect: bool = True
+) -> plt.Axes or np.ndarray:
+    """
+    Format matplotlib axes with customized appearance settings.
+
+    This function hides specific axes spines, offsets others, and adjusts tick
+    label font sizes. It ensures consistent styling across multiple axes.
+
+    Parameters
+    ----------
+    axes : plt.Axes or np.ndarray
+        A single matplotlib Axes object or an array of Axes objects to format.
+    fontsize : int, optional
+        Font size for tick labels. Default is 14.
+    hide_axes : list, optional
+        List of axes spines to hide. Default is ["top", "right"].
+    offset_axes : list, optional
+        List of axes spines to offset outward. Default is ["bottom", "left"].
+    offset : int, optional
+        Distance (in points) to offset the spines. Default is 20.
+    set_aspect : bool, optional
+        If True, set the aspect ratio of the axes to 'equal'. Default is True.
+
+    Returns
+    -------
+    plt.Axes or np.ndarray
+        Modified axes object(s).
+
+    Raises
+    ------
+    ValueError
+        If an invalid spine name is included in `hide_axes` or `offset_axes`,
+        or if `axes` is not a valid matplotlib Axes object or an array of Axes.
+    """
+
+    valid_spines = {"top", "right", "bottom", "left"}
+
+    if not set(hide_axes).issubset(valid_spines):
+        raise ValueError(
+            f"Invalid spines in hide_axes: {set(hide_axes) - valid_spines}")
+    if not set(offset_axes).issubset(valid_spines):
+        raise ValueError(
+            f"Invalid spines in offset_axes: {set(offset_axes) - valid_spines}")
+    if not isinstance(axes, (plt.Axes, np.ndarray)):
+        raise ValueError(
+            "Input axes must be a matplotlib Axes object or an array of Axes.")
+
+    if isinstance(axes, plt.Axes):
+        axes = [axes]
+
+    axes = np.atleast_1d(axes).flatten()
+
+    for ax in axes:
+        for spine in hide_axes:
+            ax.spines[spine].set_visible(False)
+        for spine in offset_axes:
+            ax.spines[spine].set_position(("outward", offset))
+        ax.tick_params("both", labelsize=fontsize)
+
+        if set_aspect:
+            ax.set_aspect('equal')
+
+    return axes
+
+
 def plot_spine_pixel_annotation(
         spines: object,
         base_image: np.ndarray,
         image_cmap: str,
         spines_cmap: str,
         spine_mask_alpha: float,
+        enumerate: bool,
+        enumerate_fontsize: int,
+        fontsize: int,
 ) -> None:
     """
-    Plots the segmented spine contours within the base image.
+    Overlay segmented spine masks onto a base image for visualization.
+
+    This function takes a base image and overlays the masks of segmented spines
+    onto it. Each spine is represented with a unique color from the specified
+    colormap. Spine contours are semi-transparent, allowing the base image to
+    remain visible underneath.
 
     Parameters
     ----------
-    base_image : np.ndarray
-        The base image to plot.
-    cmap : str
-        Color map of the base image.
     spines : object
-        Spine collection object containing spine data.
+        Spine collection object containing data for individual spines.
+        Each spine should have attributes `mask` (binary mask) and
+        `centroid_pix` (coordinates of the centroid).
+    base_image : np.ndarray
+        The base image over which the spine masks will be overlaid.
+    image_cmap : str
+        Colormap to apply to the base image.
     spines_cmap : str
-        Color map of the different spines.
-    alpha : float
-        Transparency level for the spine masks.
+        Colormap for coloring the individual spine masks.
+    spine_mask_alpha : float
+        Transparency level for the spine masks. Should be a value between 0 and 1,
+        where 0 is fully transparent and 1 is fully opaque.
+    enumerate : bool
+        If True, spines will be enumerated on the plot with their indices.
+    enumerate_fontsize : int
+        Font size for the spine labels.
+    fontsize : int
+        Font size for axes labels and ticks
 
     Returns
     -------
     None
+        Displays the plot with overlaid spine masks.
+
+    Notes
+    -----
+    - The function normalizes each spine mask to ensure binary values (0 or 1)
+      before applying color.
+    - The centroid of each spine is marked and optionally annotated with its index.
     """
 
-    fig, ax = plt.subplots()
-    print(type(spines))
+    _, ax = plt.subplots(layout="constrained")
+    ax.set_aspect('equal')
 
     ax.imshow(base_image, cmap=image_cmap)
-    ax.set_aspect('equal')
+    ax.tick_params("both", labelsize=fontsize)
+    ax.set_xlabel("", fontsize=fontsize)
+    ax.set_ylabel("", fontsize=fontsize)
 
     cmap = plt.get_cmap(spines_cmap, spines.n_spines)
 
@@ -55,84 +152,32 @@ def plot_spine_pixel_annotation(
         # Normalize the mask to make sure it is binary (0 or 1)
         mask_normalized = spine.mask.astype(bool)
 
-        shade_color = (color[0],
-                       color[1],
-                       color[2],
-                       spine_mask_alpha)
+        shade_color = (
+            color[0],
+            color[1],
+            color[2],
+            spine_mask_alpha)
+
         colored_mask = np.zeros((*mask_normalized.shape, 4))
         colored_mask[mask_normalized] = shade_color
 
         # Overlay this colored mask onto the existing image in the axes
         ax.imshow(colored_mask, interpolation='none')
 
-        ax.scatter(spine.centroid_pix[0],
-                   spine.centroid_pix[1],
-                   color=color)
+        if enumerate:
+            ax.scatter(
+                spine.centroid_pix[0],
+                spine.centroid_pix[1],
+                color=color)
 
-        ax.text(spine.centroid_pix[0], spine.centroid_pix[1],
-                str(i + 1), color=color, fontsize=12,
-                ha='center', va='bottom')
-
-
-def dummy_spine(spines_metadata, roi_metadata):
-
-    centroids = np.array(
-        [spine['centroid_pix'] for spine in spines_metadata])
-    masks = [spine['mask'] for spine in spines_metadata]
-
-    average_area = int(np.mean([np.sum(mask > 0) for mask in masks]))
-
-    dummy_mask = np.zeros_like(masks[0])
-    dummy_height = int(np.sqrt(average_area))
-    dummy_width = dummy_height
-
-    vor = Voronoi(centroids)
-
-    largest_region = None
-    largest_area = 0
-    regions = [vor.regions[i] for i in vor.point_region]
-
-    for region in regions:
-        if -1 not in region and len(region) > 0:  # Exclude infinite regions
-
-            polygon = np.array([vor.vertices[i] for i in region])
-            area = 0.5 * np.abs(np.dot(
-                polygon[:, 0], np.roll(polygon[:, 1], 1)) -
-                np.dot(polygon[:, 1], np.roll(polygon[:, 0], 1)))
-
-            if area > largest_area:
-                largest_area = area
-                largest_region = polygon
-
-    if largest_region is not None:
-        dummy_x, dummy_y = largest_region.mean(axis=0).astype(int)
-
-        dummy_x_start = max(0, dummy_x - dummy_width // 2)
-        dummy_y_start = max(0, dummy_y - dummy_height // 2)
-        dummy_x_end = min(dummy_mask.shape[1], dummy_x_start + dummy_width)
-        dummy_y_end = min(dummy_mask.shape[0], dummy_y_start + dummy_height)
-
-        dummy_mask[
-            dummy_y_start:dummy_y_end,
-            dummy_x_start:dummy_x_end
-        ] = 1
-
-    centroid_pix = calculate_centroid(dummy_mask)
-    centroid_fov = transform(
-        centroid_pix,
-        np.array(roi_metadata['affine']),
-        np.array(roi_metadata['pixel_to_ref_transform']),
-        roi_metadata['center_xy'],
-        roi_metadata['pixel_resolution_xy'])
-
-    dummy_spine_dict = {
-        'centroid_fov': centroid_fov,
-        'centroid_pix': centroid_pix,
-        'mask': dummy_mask,
-        'roi_n': spines_metadata[0]['roi_n'],
-        'roi_z': spines_metadata[0]['roi_z']}
-
-    return dummy_spine_dict
+            ax.text(
+                spine.centroid_pix[0],
+                spine.centroid_pix[1],
+                str(i + 1),
+                color=color,
+                fontsize=enumerate_fontsize,
+                ha='center',
+                va='bottom')
 
 
 def plot_spine_calcium_traces(
@@ -180,18 +225,19 @@ def plot_spine_calcium_traces(
         dFF_CA3 = spines.dFF_CA3
         timestamps_CA3 = spines.ts_BLA
 
-        traces = ElectrophyPlotter(
+        fig, axes = plt.subplots(
+            1, 2,
             figsize=(8, fig_height),
-            grid=(1, 2),
-            font_size=fontsize,
-            x_label='Time (s)',
-            y_label='Spines',
-            hidden_axis=['top', 'right'],
-            hide_xticks=False,
-            hide_yticks=False,
-            spine_offset=20,
-            fontsize=fontsize,
-            )
+            layout="constrained",
+            sharex=True,
+            sharey=True)
+
+        _format_axes(axes)
+
+        axes[0].set_xlabel("Time (s)", fontsize=fontsize)
+        axes[0].set_ylabel("Spines", fontsize=fontsize)
+        axes[0].set_ylims(y_offsets[-1], y_offsets[0])
+        axes[0].set_xlim(0, 3.5)
 
         for i, spine in enumerate(
                 tqdm(spines,
@@ -204,68 +250,56 @@ def plot_spine_calcium_traces(
                     dFF_BLA[i], timestamps_BLA[i],
                     dFF_CA3[i], timestamps_CA3[i]):
 
-                traces.plot_data(
+                axes[0].plot(
                     ts_BLA,
                     sweep_BLA + y_offsets[i],
-                    row=0,
-                    col=0,
                     color=sweep_color,
                     alpha=sweep_alpha,
                     linewidth=sweep_linewidth,
-                    y_lims=(y_offsets[-1], y_offsets[0]),
-                    x_lims=(0, 3.5),
                     clip_on=False,
-                    )
-
-                traces.plot_data(
+                )
+                axes[1].plot(
                     ts_CA3,
                     sweep_CA3 + y_offsets[i],
-                    row=0,
-                    col=1,
                     color=sweep_color,
                     alpha=sweep_alpha,
                     linewidth=sweep_linewidth,
-                    y_lims=(y_offsets[-1], y_offsets[0]),
-                    x_lims=(0, 3.5),
                     clip_on=False,
-                    )
+                )
 
-            traces.plot_data(
+            axes[0].plot(
                 ts_BLA,
                 np.mean(dFF_BLA[i], axis=0) + y_offsets[i],
-                row=0,
-                col=0,
                 color=color,
-                y_lims=(y_offsets[-1], y_offsets[0]),
-                x_lims=(0, 4),
                 clip_on=False,
                 linewidth=trace_linewidth,
-                )
-
-            traces.plot_data(
-                ts_CA3,
-                np.mean(dFF_CA3[i], axis=0) + y_offsets[i],
-                row=0,
-                col=1,
-                color=color,
-                y_lims=(y_offsets[-1], y_offsets[0]),
-                x_lims=(0, 4),
-                clip_on=False,
-                linewidth=trace_linewidth,
-                )
-
-        traces.add_vertical_scale_bar(
-            ax=traces.ax,
-            y_unit=scalebar_y_unit,
-            position=(3.5, spines.n_spines / 2 * increment),
-            y_label=fr'{scalebar_y_unit} $\Delta F/F_0$',
-            linewidth=2,
-            fontsize=fontsize,
-            row=0,
-            col=1
             )
 
-        for ax in traces.axes:
+            axes[1].plot(
+                ts_CA3,
+                np.mean(dFF_CA3[i], axis=0) + y_offsets[i],
+                color=color,
+                clip_on=False,
+                linewidth=trace_linewidth,
+            )
+
+        ymin = spines.n_spines / 2 * increment,
+        ymax = (spines.n_spines / 2 * increment) + scalebar_y_unit,
+
+        for ax in axes:
+            ax.vlines(
+                x=3.5,
+                ymin=ymin,
+                ymax=ymax,
+                linewidth=2,
+            )
+
+            ax.text(
+                x=3.5,
+                y=np.mean([ymin, ymax]),
+                s=fr'{scalebar_y_unit} $\Delta F/F_0$',
+            )
+
             ax.axvline(
                 1, color='red', alpha=0.6, lw=2, clip_on=False)
 
@@ -285,17 +319,16 @@ def plot_spine_calcium_traces(
             raise ValueError(
                 "Invalid input_type. Choose either 'CA3' or 'BLA'.")
 
-        traces = ElectrophyPlotter(
+        _, ax = plt.subplots(
             figsize=(4, fig_height),
-            font_size=fontsize,
-            x_label='Time (s)',
-            y_label='Spines',
-            hidden_axis=['top', 'right'],
-            hide_xticks=False,
-            hide_yticks=False,
-            spine_offset=20,
-            fontsize=fontsize,
-            )
+            layout="constrained",
+        )
+
+        _format_axes(ax, fontsize=fontsize)
+        ax.set_xlabel("Time (s)", fontsize=fontsize)
+        ax.set_ylabel("Spines", fontsize=fontsize)
+        ax.set_ylims(y_offsets[-1], y_offsets[0]),
+        ax.set_xlims(0, 3.5)
 
         for i, spine in enumerate(
                 tqdm(spines,
@@ -305,40 +338,37 @@ def plot_spine_calcium_traces(
             color = cmap(i)
 
             for sweep, ts in zip(dFF[i], timestamps[i]):
-                traces.plot_data(
+                ax.plot(
                     ts,
                     sweep + y_offsets[i],
                     color=sweep_color,
                     alpha=sweep_alpha,
                     linewidth=sweep_linewidth,
-                    y_lims=(y_offsets[-1], y_offsets[0]),
-                    x_lims=(0, 3.5),
-                    clip_on=False,
-                    )
 
-            traces.plot_data(
+                    clip_on=False,
+                )
+
+            ax.plot(
                 ts,
                 np.mean(dFF[i], axis=0) + y_offsets[i],
                 color=color,
-                y_lims=(y_offsets[-1], y_offsets[0]),
-                x_lims=(0, 4),
                 clip_on=False,
                 linewidth=trace_linewidth,
-                )
-
-        traces.add_vertical_scale_bar(
-            ax=traces.ax,
-            y_unit=scalebar_y_unit,
-            position=(3.5, spines.n_spines / 2 * increment),
-            y_label=fr'{scalebar_y_unit} $\Delta F/F_0$',
-            linewidth=2,
-            fontsize=fontsize,
             )
 
-        traces.ax.axvline(1, color='red', alpha=0.6, lw=2, clip_on=False)
+        ymin = spines.n_spines / 2 * increment,
+        ymax = (spines.n_spines / 2 * increment) + scalebar_y_unit,
 
-        traces.ax.set_yticks(y_offsets)
-        traces.ax.set_yticklabels(list(range(1, spines.n_spines + 1)))
+        ax.text(
+            x=3.5,
+            y=np.mean([ymin, ymax]),
+            s=fr'{scalebar_y_unit} $\Delta F/F_0$',
+        )
+
+        ax.axvline(1, color='red', alpha=0.6, lw=2, clip_on=False)
+
+        ax.set_yticks(y_offsets)
+        ax.set_yticklabels(list(range(1, spines.n_spines + 1)))
 
 
 def plot_spine_zscores(
@@ -369,29 +399,25 @@ def plot_spine_zscores(
     else:
         raise ValueError("Invalid input_type. Choose either 'CA3' or 'BLA'.")
 
-    fig_zcore, ax_zscore = plt.subplots()
+    _, ax_zscore = plt.subplots()
 
-    for i, spine in enumerate(
-            tqdm(spines,
-                 desc="Plotting spines z-scores",
-                 total=spines.n_spines)):
+    zscores_stacked = np.vstack(zscores)
 
-        # for sweep, ts in zip(zscore[i], timestamps[i]):
-
-        zscores_stacked = np.vstack(zscores)
-        im = ax_zscore.imshow(
-            zscores_stacked,
-            aspect='auto',
-            cmap=zscore_cmap,
-            extent=[np.min([ts[0] for ts in timestamps]),
-                    np.max([ts[-1] for ts in timestamps]),
-                    0,
-                    spines.n_spines],
-            interpolation='none',
-            )
+    im = ax_zscore.imshow(
+        zscores_stacked,
+        aspect='auto',
+        cmap=zscore_cmap,
+        extent=[np.min([ts[0] for ts in timestamps]),
+                np.max([ts[-1] for ts in timestamps]),
+                0,
+                spines.n_spines],
+        interpolation='none',
+    )
     plt.colorbar(im, ax=ax_zscore, label='Z-score')
-    ax_zscore.set_xlabel('Time (s)')
-    ax_zscore.set_ylabel('Sweeps of spines')
+
+    ax_zscore.set_xlabel('Time (s)', fontsize=fontsize)
+    ax_zscore.set_ylabel('Sweeps of spines', fontsize=fontsize)
+    ax_zscore.tick_params("both", labelsize=fontsize)
     ax_zscore.invert_yaxis()
 
 
@@ -415,18 +441,20 @@ def plot_single_spine_dFF(
         dFF_CA3 = spine.dFF_CA3
         timestamps_CA3 = spine.ts_BLA
 
-        traces = ElectrophyPlotter(
+        _, axes = plt.subplots(
+            2, 2,
             figsize=(10, 5),
-            grid=(2, 2),
-            height_ratios=(1, 2),
-            font_size=fontsize,
-            x_label='Time (s)',
-            y_label='Sweeps',
-            hidden_axis=['top', 'right'],
-            hide_xticks=False,
-            hide_yticks=False,
-            spine_offset=20,
-            )
+            layout="constrained",
+            sharex=True,
+            sharey=True,
+        )
+
+        _format_axes(ax, fontsize=fontsize)
+
+        axes[0, 0].set_ylims(y_offsets[0], y_offsets[-1])
+        axes[0, 0].set_xlims(0, 4)
+        axes[0, 0].set_xlabel('Time (s)', fontsize=fontsize)
+        axes[0, 0].set_ylabel('Sweeps', fontsize=fontsize)
 
         y_offsets = np.linspace(
             0, len(dFF_BLA) * increment, len(dFF_BLA))
@@ -434,131 +462,88 @@ def plot_single_spine_dFF(
         for i, (sweep_BLA, sweep_CA3, ts_BLA, ts_CA3) in enumerate(zip(
                 dFF_BLA, dFF_CA3, timestamps_BLA, timestamps_CA3)):
 
-            traces.plot_data(
+            axes[0, 0].plot(
                 ts_BLA,
                 sweep_BLA,
-                row=0,
-                col=0,
                 color=sweep_color,
                 alpha=sweep_alpha,
                 linewidth=sweep_linewidth,
-                y_lims=(y_offsets[0], y_offsets[-1]),
-                x_lims=(0, 4),
                 clip_on=False,
-                )
+            )
 
-            traces.plot_data(
+            axes[0, 1].plot(
                 ts_CA3,
                 sweep_CA3,
-                row=0,
-                col=1,
                 color=sweep_color,
                 alpha=sweep_alpha,
                 linewidth=sweep_linewidth,
-                y_lims=(y_offsets[0], y_offsets[-1]),
-                x_lims=(0, 4),
                 clip_on=False,
-                )
+            )
 
-            traces.plot_data(
+            axes[1, 0].plot(
                 ts_BLA,
                 sweep_BLA + y_offsets[i],
-                row=1,
-                col=0,
                 color=sweep_color,
                 alpha=sweep_alpha,
                 linewidth=sweep_linewidth,
-                y_lims=(y_offsets[0], y_offsets[-1]),
-                x_lims=(0, 4),
                 clip_on=False,
-                )
+            )
 
-            traces.plot_data(
+            axes[1, 1].plot(
                 ts_CA3,
                 sweep_CA3 + y_offsets[i],
-                row=1,
-                col=1,
                 color=sweep_color,
                 alpha=sweep_alpha,
                 linewidth=sweep_linewidth,
-                y_lims=(y_offsets[0], y_offsets[-1]),
-                x_lims=(0, 4),
                 clip_on=False,
-                )
+            )
 
-        traces.plot_data(
+        axes[0, 0].plot(
             ts_BLA,
             np.mean(dFF_BLA, axis=0),
-            row=0,
-            col=0,
             color=mean_color,
             alpha=mean_alpha,
             linewidth=mean_linewidth,
-            y_lims=(np.min(dFF_BLA) - 0.1, np.max(dFF_BLA) + 0.1),
-            x_lims=(0, 4),
             clip_on=False,
-            )
-        traces.axes[0, 0].spines[['bottom', 'left']].set_visible(False)
-        traces.axes[0, 0].set_xticks([])
-        traces.axes[0, 0].set_xticklabels([])
-        traces.axes[0, 0].set_xlabel('')
-        traces.axes[0, 0].set_yticks([])
-        traces.axes[0, 0].set_yticklabels([])
-        traces.axes[0, 0].set_ylabel('')
+        )
 
-        traces.plot_data(
+        axes[0, 1](
             ts_CA3,
             np.mean(dFF_CA3, axis=0),
-            row=0,
-            col=1,
             color=mean_color,
             alpha=mean_alpha,
             linewidth=mean_linewidth,
-            y_lims=(np.min(dFF_CA3) - 0.1, np.max(dFF_CA3) + 0.1),
-            x_lims=(0, 4),
             clip_on=False,
-            )
-        traces.axes[0, 1].spines[['bottom', 'left']].set_visible(False)
-        traces.axes[0, 1].set_xticks([])
-        traces.axes[0, 1].set_xticklabels([])
-        traces.axes[0, 1].set_xlabel('')
-        traces.axes[0, 1].set_yticks([])
-        traces.axes[0, 1].set_yticklabels([])
-        traces.axes[0, 1].set_ylabel('')
+        )
 
-        traces.add_vertical_scale_bar(
-            ax=traces.axes[0, 1],
-            y_unit=scalebar_y_unit,
-            position=(3.5, np.mean(dFF_BLA[0])),
-            y_label=fr'{scalebar_y_unit} $\Delta F/F_0$',
-            linewidth=2,
-            fontsize=fontsize,
-            row=0,
-            col=1
-            )
+        for n in [0, 1]:
 
-        traces.add_vertical_scale_bar(
-            ax=traces.axes[1, 1],
-            y_unit=scalebar_y_unit,
-            position=(3.5, len(dFF_BLA) / 2 * increment),
-            y_label=fr'{scalebar_y_unit} $\Delta F/F_0$',
-            linewidth=2,
-            fontsize=fontsize,
-            row=0,
-            col=1
+            ymin = np.mean(dFF[0]) if n == 0 else len(dFF) / 2 * increment
+            ymax = ymin + scalebar_y_unit
+
+            axes[0, n].set(
+                xticks=[],
+                xticklabels=[],
+                xlabel='',
+                yticks=y_offsets,
+                yticklabels=(list(range(1, len(dFF_BLA) + 1))),
+                ylabel='')
+
+            axes[n, 1].vlines(
+                x=3.5,
+                ymin=ymin,
+                ymax=ymax,
+                linewidth=2,
             )
 
-        for ax in traces.axes[0]:
-            ax.axvline(
+            ax.text(
+                x=3.5,
+                y=np.mean([ymin, ymax]),
+                s=fr'{scalebar_y_unit} $\Delta F/F_0$',
+            )
+
+            axes[n, 0].axvline(
                 1, color='red', alpha=0.6, lw=2, clip_on=False)
-
-        for ax in traces.axes[1]:
-            ax.axvline(
-                1, color='red', alpha=0.6, lw=2, clip_on=False)
-
-            ax.set_yticks(y_offsets)
-            ax.set_yticklabels(
-                list(range(1, len(dFF_BLA) + 1)))
 
     else:
         if input_type == 'CA3':
@@ -571,93 +556,74 @@ def plot_single_spine_dFF(
             raise ValueError(
                 "Invalid input_type. Choose either 'CA3' or 'BLA'.")
 
-        traces = ElectrophyPlotter(
+        _, axes = plt.subplots(
+            2, 1,
             figsize=(5, 5),
-            grid=(2, 1),
-            height_ratios=(1, 2),
-            font_size=fontsize,
-            x_label='Time (s)',
-            y_label='Sweeps',
-            hidden_axis=['top', 'right'],
-            hide_xticks=False,
-            hide_yticks=False,
-            spine_offset=20,
-            fontsize=fontsize,
-            )
+            layout="constrained",
+            sharex=True,
+        )
+
+        _format_axes(axes, fontsize=fontsize)
+
+        axes[0].set_ylims(np.min(dFF) - 0.1, np.max(dFF) + 0.1)
+        axes[0].set_xlims(0, 4)
+        axes[0].set_xlabel('Time (s)', fontsize=fontsize)
+        axes[0].set_ylabel('Sweeps', fontsize=fontsize)
+        axes[1].set_ylims(y_offsets[0], y_offsets[-1])
 
         y_offsets = np.linspace(
             0, len(dFF) * increment, len(dFF))
 
         for i, (sweep, ts) in enumerate(zip(dFF, timestamps)):
 
-            traces.plot_data(
+            axes[0].plot(
                 ts,
                 sweep,
-                row=0,
-                col=0,
                 color=sweep_color,
                 alpha=sweep_alpha,
                 linewidth=sweep_linewidth,
-                y_lims=(np.min(dFF) - 0.1, np.max(dFF) + 0.1),
-                x_lims=(0, 4),
                 clip_on=False,
-                )
+            )
 
-            traces.plot_data(
+            axes[1].plot(
                 ts,
                 sweep + y_offsets[i],
-                row=1,
-                col=0,
                 color=sweep_color,
                 alpha=sweep_alpha,
                 linewidth=sweep_linewidth,
-                y_lims=(y_offsets[0], y_offsets[-1]),
-                x_lims=(0, 4),
                 clip_on=False,
-                )
+            )
 
-        traces.plot_data(
+        axes[0].plot(
             ts,
             np.mean(dFF, axis=0),
-            row=0,
-            col=0,
             color=mean_color,
-            y_lims=(np.min(dFF) - 0.1, np.max(dFF) + 0.1),
-            x_lims=(0, 4),
             clip_on=False,
             linewidth=mean_linewidth,
+        )
+
+        for n, ax in enumerate(axes):
+
+            ymin = np.mean(dFF[0]) if n == 0 else len(dFF) / 2 * increment
+            ymax = ymin + scalebar_y_unit
+
+            ax.vlines(
+                x=3.5,
+                ymin=ymin,
+                ymax=ymax,
+                linewidth=2,
             )
 
-        traces.add_vertical_scale_bar(
-            ax=traces.axes[0],
-            y_unit=scalebar_y_unit,
-            position=(3.5, np.mean(dFF[0])),
-            y_label=fr'{scalebar_y_unit} $\Delta F/F_0$',
-            linewidth=2,
-            fontsize=fontsize,
+            ax.text(
+                x=3.5,
+                y=np.mean([ymin, ymax]),
+                s=fr'{scalebar_y_unit} $\Delta F/F_0$',
+                fontsize=fontsize
             )
 
-        traces.add_vertical_scale_bar(
-            ax=traces.axes[1],
-            y_unit=scalebar_y_unit,
-            position=(3.5, len(dFF) / 2 * increment),
-            y_label=fr'{scalebar_y_unit} $\Delta F/F_0$',
-            linewidth=2,
-            fontsize=fontsize,
-            )
-
-        for ax in traces.axes:
             ax.axvline(
                 1, color='red', alpha=0.6, lw=2, clip_on=False)
 
-        traces.axes[1].set_yticks(y_offsets)
-        traces.axes[1].set_yticklabels(
+        axes[1].set_yticks(y_offsets)
+        axes[1].set_yticklabels(
             list(range(1, len(dFF) + 1)))
-
-        traces.axes[0].spines[['bottom', 'left']].set_visible(False)
-        traces.axes[0].set_xticks([])
-        traces.axes[0].set_xticklabels([])
-        traces.axes[0].set_xlabel('')
-        traces.axes[0].set_yticks([])
-        traces.axes[0].set_yticklabels([])
-        traces.axes[0].set_ylabel('')

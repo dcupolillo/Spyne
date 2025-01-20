@@ -60,79 +60,31 @@ def plot_all_spines(
     None
     """
 
-    # Convert CuPy array to NumPy array for plotting
     all_centroids = np.array(collect_centroid_fov(all_spines))
 
     if len(all_centroids) == 0:
         raise ValueError("No spine data found in the segmenter.")
 
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
+        _, ax = plt.subplots(
+            figsize=(8, 8),
+            layout="constrained")
 
         # Set labels and colors
         ax.set_xlabel('X coordinate', fontsize=fontsize)
         ax.set_ylabel('Y coordinate', fontsize=fontsize)
+        ax.tick_params("both", labelsize=fontsize)
 
         # Set equal aspect ratio
-        ax.set_aspect('equal', adjustable='box')
+        ax.set_aspect('equal')
 
-    ax.scatter(all_centroids[:, 0],
-               all_centroids[:, 1],
-               s=spine_size,
-               color=spine_color)
+    ax.scatter(
+        all_centroids[:, 0],  # xs of all centroids in the field-of-view
+        all_centroids[:, 1],  # ys of all centroids in the field-of-view
+        s=spine_size,
+        color=spine_color)
 
-
-# def plot_all_dendrites(
-#         all_dendrites: np.ndarray,
-#         dendrite_size: int,
-#         dendrite_color: str or tuple[float, float, float],
-#         ax: plt.Axes = None,
-# ) -> None:
-#     """
-#     Plot all spine centroids from the segmenter.
-
-#     Parameters
-#     ----------
-#     all_spines : cp.ndarray
-#         The spine data as a CuPy array.
-#     spine_size : int, optional
-#         Size of the scatter points, by default 5.
-#     spine_color : str or tuple, optional
-#         Color of the scatter points, by default 'cyan'.
-#     ax : matplotlib.axes.Axes, optional
-#         Matplotlib Axes object to plot on. If None, a new figure is created.
-
-#     Raises
-#     ------
-#     ValueError
-#         If no spine data is found in the segmenter.
-
-#     Returns
-#     -------
-#     None
-#     """
-#     # Convert CuPy array to NumPy array for plotting
-#     print("Converting CuPy array to NumPy array for plotting...")
-#     all_dendrites_np = all_dendrites.get()
-
-#     # Plot with Matplotlib
-#     print("Plotting data...")
-#     if ax is None:
-#         fig, ax = plt.subplots(figsize=(8, 8))
-
-#     ax.scatter([x[0] for x in all_dendrites_np],
-#                [y[1] for y in all_dendrites_np],
-#                s=dendrite_size,
-#                color=dendrite_color)
-
-#     # Set equal aspect ratio
-#     ax.set_aspect('equal', adjustable='box')
-
-#     # Set labels and colors
-#     ax.set_xlabel('X coordinate')
-#     ax.set_ylabel('Y coordinate')
-
-#     print("Plotting completed.")
+    plt.show()
 
 
 def plot_all_zscore_heatmap(
@@ -235,7 +187,7 @@ def plot_all_zscore_heatmap(
             processed_timestamps_CA3 = processed_timestamps_CA3[
                 sorted_indices_CA3]
 
-        fig_zcore, ax_zscore = plt.subplots(1, 2, sharex=True, sharey=True)
+        _, ax_zscore = plt.subplots(1, 2, sharex=True, sharey=True)
 
         BLA = ax_zscore[0].imshow(
             processed_zscores_BLA,
@@ -268,7 +220,7 @@ def plot_all_zscore_heatmap(
                 clip_on=False)
 
             if average:
-                ax.set_yticks([0, len(processed_zscore_BLA)])
+                ax.set_yticks([0, len(processed_zscores_BLA)])
 
         plt.colorbar(BLA, ax=ax_zscore[0], label='Z-score')
         plt.colorbar(CA3, ax=ax_zscore[1], label='Z-score')
@@ -301,12 +253,16 @@ def plot_all_zscore_heatmap(
 
         if sort:
             sorting_values = np.array(
-                [np.mean(trace[start:end]) for trace in processed_zscores])
+                [np.mean(trace[start:end])
+                 for trace in processed_zscores])
             sorted_indices = np.argsort(sorting_values)
             processed_zscores = processed_zscores[sorted_indices]
             processed_timestamps = processed_timestamps[sorted_indices]
 
-        fig, ax = plt.subplots(1, 1)
+        _, ax = plt.subplots(
+            1, 1,
+            layout="constrained")
+
         img = ax.imshow(
             processed_zscores,
             aspect='auto',
@@ -333,43 +289,30 @@ def plot_all_zscore_heatmap(
         ax.set_ylabel(y_label)
         ax.invert_yaxis()
 
+    plt.show()
+
 
 def plot_events_spines(
         all_spines: list,
-        events_probability: list,
+        events: list,
         n_event_threshold: int,
         spine_size: int,
         fontsize: int,
-        ax: plt.Axes = None,
-        show_cmap: bool = None,
-        cmap: str = 'viridis',
-        dynamic_threshold_percentile: int = None,
+        ax: plt.Axes,
+        show_cmap: bool,
+        cmap: str,
 ) -> None:
 
-    if n_event_threshold > len(events_probability[0]):
+    if n_event_threshold > len(events[0]):
         raise ValueError(
-            f"n_event_threshold should be <= {len(events_probability[0])}")
+            f"n_event_threshold should be <= {len(events[0])}")
 
     all_centroids = np.array(collect_centroid_fov(all_spines))
 
     if len(all_centroids) == 0:
         raise ValueError("No spine data found.")
 
-    flatten_probabilities = np.array(
-        [sweep for spine in events_probability for sweep in spine]
-    )
-
-    dynamic_threshold = np.percentile(
-        flatten_probabilities[~np.isnan(flatten_probabilities)],
-        dynamic_threshold_percentile)
-
-    binary_flag = np.zeros_like(events_probability)
-    for n, spine in enumerate(events_probability):
-        for i, sweep_prob in enumerate(spine):
-            if sweep_prob >= dynamic_threshold:
-                binary_flag[n][i] = 1
-
-    event_counts = [sum(flag) for flag in binary_flag]
+    event_counts = [sum(flag) for flag in events]
 
     # Filter out spines with n events
     nonzero_centroids = [
@@ -382,17 +325,18 @@ def plot_events_spines(
     if len(nonzero_centroids) == 0:
         raise ValueError("No spines with events found.")
 
-    # Plot with Matplotlib
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
+        _, ax = plt.subplots(
+            figsize=(8, 8),
+            layout="constrained")
 
     ax.set_xlabel('X coordinate', fontsize=fontsize)
     ax.set_ylabel('Y coordinate', fontsize=fontsize)
     ax.set_aspect('equal', adjustable='box')
 
     scatter = ax.scatter(
-        [c[0] for c in nonzero_centroids],  # X coordinates of filtered spines
-        [c[1] for c in nonzero_centroids],  # Y coordinates of filtered spines
+        [c[0] for c in nonzero_centroids],  # X coordinates of selected spines
+        [c[1] for c in nonzero_centroids],  # Y coordinates of selected spines
         s=spine_size,
         c=nonzero_event_counts,
         cmap=cmap,
@@ -408,11 +352,13 @@ def plot_events_spines(
         cbar.set_label('Number of Events', fontsize=fontsize)
         cbar.set_ticks([1, 2, 3, 4, 5])
 
+    plt.show()
+
 
 def spine_sholl(
         all_spines: dict,
         morphology: object,
-        events_flag: list,
+        events: list,
         n_event_threshold: int,
         radius_step: float,
         n_radii: int,
@@ -438,16 +384,18 @@ def spine_sholl(
     # Get spine centroids and event counts
     all_centroids = np.array(collect_centroid_fov(all_spines))
 
-    if events_flag:
-        event_counts = [sum(flags) for flags in events_flag]
+    if events:
+        event_counts = [sum(flags) for flags in events]
 
         # Filter out spines with 0 events
         nonzero_centroids = [
             centroid for centroid, count in zip(all_centroids, event_counts)
             if count > n_event_threshold]
-        nonzero_event_counts = [count
-                                for count in event_counts
-                                if count > n_event_threshold]
+
+        nonzero_event_counts = [
+            count
+            for count in event_counts
+            if count > n_event_threshold]
 
         spine_positions = np.copy(nonzero_centroids)
         spine_positions[:, 0:2] *= obj_resolution  # convert to µm
@@ -465,9 +413,10 @@ def spine_sholl(
 
     # Loop over each radius
     for i, radius in enumerate(radii):
-        distances = np.sqrt((spine_positions[:, 0] - center_point[0]) ** 2 +
-                            (spine_positions[:, 1] - center_point[1]) ** 2 +
-                            (spine_positions[:, 2] - center_point[2]) ** 2)
+        distances = np.sqrt(
+            (spine_positions[:, 0] - center_point[0]) ** 2 +
+            (spine_positions[:, 1] - center_point[1]) ** 2 +
+            (spine_positions[:, 2] - center_point[2]) ** 2)
 
         if i == 0:
             # For the first radius, count spines within the first circle
@@ -489,9 +438,10 @@ def spine_sholl(
             # Find the closest node in morphology
             closest_node = min(
                 morphology.neuron,  # List of nodes
-                key=lambda node: np.sqrt((spine_position[0] - node.x) ** 2 +
-                                         (spine_position[1] - node.y) ** 2 +
-                                         (spine_position[2] - node.z) ** 2))
+                key=lambda node: np.sqrt(
+                    (spine_position[0] - node.x) ** 2 +
+                    (spine_position[1] - node.y) ** 2 +
+                    (spine_position[2] - node.z) ** 2))
 
             # Increment the count based on node type (apical or basal)
             if closest_node.type == 'apical dendrite':
@@ -505,7 +455,9 @@ def spine_sholl(
 
     # Plotting the spines and Sholl circles
     if ax is None:
-        fig, ax = plt.subplots(figsize=(8, 8))
+        _, ax = plt.subplots(
+            figsize=(8, 8),
+            layout="constrained")
 
     for radius in radii:
         circle = plt.Circle(
@@ -516,7 +468,7 @@ def spine_sholl(
             linewidth=circle_linewidth)
         ax.add_artist(circle)
 
-    if events_flag:
+    if events:
         scatter = ax.scatter(
             [c[0] for c in spine_positions],
             [c[1] for c in spine_positions],
@@ -529,6 +481,7 @@ def spine_sholl(
         cbar = plt.colorbar(scatter, ax=ax, orientation=colorbar_orientation)
         cbar.set_label('Number of Events', fontsize=fontsize)
         cbar.ax.tick_params(labelsize=fontsize)
+
     else:
         ax.scatter(
             [c[0] for c in spine_positions],
@@ -542,20 +495,28 @@ def spine_sholl(
 
     # Plot the Sholl curve (apical and basal separately)
     if not ax_sholl_curve:
-        fig_sholl_curve, ax_sholl_curve = plt.subplots(figsize=(6, 4))
+        _, ax_sholl_curve = plt.subplots(
+            figsize=(6, 4),
+            layout="constrained")
 
-    ax_sholl_curve.plot(radii, apical_counts,
-                        color=countline_color,
-                        lw=countline_width,
-                        ls=countline_style,
-                        alpha=countline_alpha,
-                        clip_on=False)
-    ax_sholl_curve.plot(-radii, basal_counts,
-                        color=countline_color,
-                        lw=countline_width,
-                        ls=countline_style,
-                        alpha=countline_alpha,
-                        clip_on=False)
+    ax_sholl_curve.plot(
+        radii,
+        apical_counts,
+        color=countline_color,
+        lw=countline_width,
+        ls=countline_style,
+        alpha=countline_alpha,
+        clip_on=False)
+
+    ax_sholl_curve.plot(
+        -radii,
+        basal_counts,
+        color=countline_color,
+        lw=countline_width,
+        ls=countline_style,
+        alpha=countline_alpha,
+        clip_on=False)
+
     ax_sholl_curve.set_xlabel('Radius (μm)', fontsize=fontsize)
     ax_sholl_curve.set_ylabel('Number of Spines', fontsize=fontsize)
 

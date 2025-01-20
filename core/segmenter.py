@@ -6,26 +6,31 @@ import numpy as np
 import tensorflow as tf
 import flammkuchen as fl
 from tqdm import tqdm
-from itertools import chain
 from functools import cache
 import matplotlib.pyplot as plt
 
 from spyne.display.events import (
-    plot_spine_pixel_annotation, plot_spine_calcium_traces,
-    plot_spine_zscores, plot_single_spine_dFF)
+    plot_spine_pixel_annotation,
+    plot_spine_calcium_traces,
+    plot_spine_zscores,
+    plot_single_spine_dFF)
 from spyne.display.plot_segmenter import (
-    plot_all_spines, plot_events_spines, plot_all_zscore_heatmap,
+    plot_all_spines,
+    plot_events_spines,
+    plot_all_zscore_heatmap,
     spine_sholl)
-
 from spyne.core.semantic_segmentation.pipeline import semantic_segmentation_pipeline
 from spyne.core.semantic_segmentation.padding import pad_image
 from spyne.core.semantic_segmentation.inference import inference
 from spyne.core.semantic_segmentation.post_processing import process_predictions
 from spyne.core.zscore_classifier.timeseries_pipeline import collect_timeseries
 from spyne.core.zscore_classifier.inference import (
-    detect_calcium_events, binarize_calcium_events_array)
+    detect_calcium_events,
+    binarize_calcium_events_array)
 from spyne.core.zscore_classifier.calculate_timeseries import (
-    dFF, get_time_series, z_score)
+    dFF,
+    get_time_series,
+    z_score)
 
 
 class DatasetSegmenter:
@@ -73,7 +78,8 @@ class DatasetSegmenter:
             kernel_size: int = 3,
             classifier_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
-                r"neuralnetwork/zscore_decoder/models/zscore_new_best_model.pth"),
+                r"neuralnetwork/zscore_decoder/models/"
+                r"zscore_new_best_model.pth"),
             classifier_cutoff: int = 99,
     ) -> None:
         """
@@ -198,8 +204,8 @@ class DatasetSegmenter:
             'dFF_BLA': 'dFF_BLA.h5',
             'ts_BLA': 'ts_BLA.h5',
             'spines_data': 'spines_data.h5',
-            'calcium_events_BLA': 'calcium_event_BLA.h5',
-            'calcium_events_CA3': 'calcium_event_CA3.h5',
+            'calcium_events_BLA': 'calcium_events_BLA.h5',
+            'calcium_events_CA3': 'calcium_events_CA3.h5',
             'calcium_events_binary_BLA': 'calcium_events_binary_BLA.h5',
             'calcium_events_binary_CA3': 'calcium_events_binary_CA3.h5'
         }
@@ -224,7 +230,6 @@ class DatasetSegmenter:
 
                 try:
                     setattr(self, attr, fl.load(file_path))
-
                 except FileNotFoundError:
                     setattr(self, attr, [])
 
@@ -325,9 +330,9 @@ class DatasetSegmenter:
             spine_counter += n_spines_per_roi
 
         # Sanity check to ensure spine data consistency
-        # assert (
-        #     ([len(i) for i in self.spines_data]) ==
-        #     ([len(roi.spines_data) for roi in segmenters]))
+        assert (
+            ([len(i) for i in self.spines_data]) ==
+            ([len(roi.spines_data) for roi in segmenters]))
 
         (
             self.zscores_CA3,
@@ -391,7 +396,7 @@ class DatasetSegmenter:
     def fetch_spine_data(
             self,
             data_batch: list or np.ndarray,
-            spine_indices: list[int]
+            spine_indices: list
     ) -> np.ndarray:
         """
         Helper function to retrieve data from a given ROI based on spine indices.
@@ -467,12 +472,12 @@ class DatasetSegmenter:
             selected_ts_BLA,
             selected_spines_data,)
 
-    def plot_all_spines(
+    def plot_spines(
             self,
             spine_size: int = 20,
-            spine_color: str or tuple = (1, 0, 1),
+            spine_color: str or tuple = "fuchsia",
             ax: plt.Axes = None,
-            fontsize: int = 10,
+            fontsize: int = 14,
     ) -> None:
         """
         Visualize all detected spines of the dataset
@@ -512,26 +517,62 @@ class DatasetSegmenter:
             fontsize: int = 10,
             cmap: str = 'viridis',
             show_cmap: bool = True,
-            dynamic_threshold_percentile: int = 99,
     ) -> None:
+        """
+        Plot putative "active" spines with event-based coloring.
+
+        Parameters
+        ----------
+        input_type : str, optional
+            The data type to use for event analysis ('BLA' or 'CA3'). Default is 'BLA'.
+        n_event_threshold : int, optional
+            Minimum number of events required for a spine to be considered active.
+            Default is 0.
+        spine_size : int, optional
+            Size of the markers representing spines in the plot. Default is 20.
+        ax : plt.Axes, optional
+            Matplotlib Axes object to draw the plot on. If None, a new figure and Axes
+            are created. Default is None.
+        fontsize : int, optional
+            Font size for plot labels and annotations. Default is 10.
+        cmap : str, optional
+            Colormap used to represent the event counts for each spine. Default is 'viridis'.
+        show_cmap : bool, optional
+            Whether to display the colormap bar alongside the plot. Default is True.
+
+        Returns
+        -------
+        None
+            The function creates and displays the plot.
+
+        Raises
+        ------
+        ValueError
+            If an invalid `input_type` is provided (must be 'BLA' or 'CA3').
+
+        Notes
+        -----
+        - This function highlights spines based on their activity levels (calcium events).
+        - Active spines are colored according to the number of events they have,
+        with the color intensity determined by the `cmap`.
+        """
 
         if input_type == 'BLA':
-            events_probability = self.calcium_events_BLA
+            events = self.calcium_events_binary_BLA
         elif input_type == 'CA3':
-            events_probability = self.calcium_events_CA3
+            events = self.calcium_events_binary_CA3
         else:
             raise ValueError("Incorrect input type")
 
         return plot_events_spines(
             all_spines=self.spines_data,
-            events_probability=events_probability,
+            events=events,
             n_event_threshold=n_event_threshold,
             spine_size=spine_size,
             ax=ax,
             fontsize=fontsize,
             cmap=cmap,
-            show_cmap=show_cmap,
-            dynamic_threshold_percentile=dynamic_threshold_percentile)
+            show_cmap=show_cmap)
 
     def sholl(
             self,
@@ -555,45 +596,80 @@ class DatasetSegmenter:
             colorbar_orientation: str = 'vertical'
     ) -> np.ndarray:
         """
-        Perform a Sholl analysis on spines and dendrites.
+        Perform a Sholl analysis of spines.
 
         Parameters
         ----------
         morphology : object
-            The morphology object to analyze.
+            Morphology object containing spatial data for spines and dendrites.
         radius_step : float
-            Step size between concentric spheres in the analysis.
+            Distance between consecutive concentric spheres in the Sholl analysis.
         n_radii : int
-            Number of radii to consider.
+            Number of radii (spheres) to generate for the analysis.
         input_type : str, optional
             Specify the data type ('BLA' or 'CA3') for event-based analysis.
-            Default is None.
+            If None, all spines are considered. Default is None.
         n_event_threshold : int, optional
-            Minimum number of events required for inclusion. Default is 0.
+            Minimum number of events required for a spine to be included in the analysis.
+            Default is 0.
         ax : plt.Axes, optional
-            Axes for the Sholl plot. Default is None.
+            Matplotlib Axes object for plotting the Sholl analysis in 2D space. Default is None.
         ax_sholl_curve : plt.Axes, optional
-            Axes for the Sholl curve. Default is None.
+            Matplotlib Axes object for plotting the Sholl intersection curve. Default is None.
+        circle_color : str, optional
+            Color of the concentric circles in the plot. Default is 'gray'.
+        circle_linestyle : str, optional
+            Linestyle for the concentric circles. Default is 'dashed'.
+        circle_linewidth : int or float, optional
+            Line width for the concentric circles. Default is 1.
+        countline_color : str, optional
+            Color of the lines representing intersection counts in the plot. Default is 'black'.
+        countline_width : int or float, optional
+            Line width for the intersection count lines. Default is 1.
+        countline_style : str, optional
+            Linestyle for the intersection count lines. Default is None (solid line).
+        countline_alpha : float, optional
+            Transparency of the intersection count lines. Default is 0.5.
+        size : int or float, optional
+            Size of the markers representing spines. Default is 60.
+        fontsize : int, optional
+            Font size for plot annotations and labels. Default is 12.
+        cmap : str, optional
+            Colormap used to represent spine activity or other properties. Default is 'viridis'.
+        colorbar_orientation : str, optional
+            Orientation of the colorbar ('vertical' or 'horizontal'). Default is 'vertical'.
 
         Returns
         -------
         np.ndarray
             Array of intersection counts at each radius.
+
+        Raises
+        ------
+        ValueError
+            If an invalid `input_type` is provided (must be 'BLA', 'CA3', or None).
+
+        Notes
+        -----
+        - Sholl analysis is used to quantify the distribution of spines or activated spines
+        (BLA or CA3) as a function of radial distance from the soma.
+        - The concentric circles represent different distances, and the intersections
+        quantify how many spines lie within each radius.
         """
 
         if not input_type:
-            event_list = None
+            events = None
         elif input_type == 'BLA':
-            event_list = self.calcium_events_BLA
+            events = self.calcium_events_binary_BLA
         elif input_type == 'CA3':
-            event_list = self.calcium_events_CA3
+            events = self.calcium_events_binary_CA3
         else:
             raise ValueError("Incorrect input type")
 
         return spine_sholl(
             all_spines=self.spines_data,
             morphology=morphology,
-            events_flag=event_list,
+            events=events,
             n_event_threshold=n_event_threshold,
             radius_step=radius_step,
             n_radii=n_radii,
@@ -843,10 +919,6 @@ class RoiSegmenter:
             If segmentation results are already present.
         """
 
-        # TODO : check new inference module organization
-        # Segmenter is fixed, RoiSegmenter to be done
-        # adjust passed parameters, using config
-
         if self.spines_data is not None:
             return
 
@@ -875,23 +947,44 @@ class RoiSegmenter:
             image_cmap: str = 'binary_r',
             spines_cmap: str = 'gist_rainbow',
             spine_mask_alpha: float = 0.5,
+            enumerate: bool = True,
+            enumerate_fontsize: int = 12,
+            fontsize: int = 14,
     ) -> None:
         """
-        Plot segmentation masks over the base image.
+        Visualize segmented spine masks over the base image.
+
+        This method overlays the segmented spine masks onto the base image,
+        using specified colormaps for the image and spines. The transparency of
+        the masks can also be adjusted.
 
         Parameters
         ----------
         image_cmap : str, optional
-            Colormap for the base image.
+            Colormap to apply to the base image. Default is 'binary_r'.
         spines_cmap : str, optional
-            Colormap for spine masks.
+            Colormap to use for the spine masks. Default is 'gist_rainbow'.
         spine_mask_alpha : float, optional
-            Transparency for spine masks.
+            Transparency level for the spine masks. Default is 0.5 (50% transparency).
+        enumerate : bool, optional
+            Enumerate spines with their indices and centroid. Default is True.
+        fontsize : int, optional
+            The size of the font. Default is 14.
+
+        Returns
+        -------
+        None
+            Displays the plot with overlaid spine masks.
 
         Raises
         ------
         KeyError
-            If inference has not been performed.
+            If no spine data is available (inference has not been performed).
+
+        Notes
+        -----
+        - This method internally calls `plot_spine_pixel_annotation` for visualization.
+        - Ensure that spine data (`self.spines_data`) is available before calling this method.
         """
 
         if self.spines_data is None:
@@ -902,7 +995,10 @@ class RoiSegmenter:
             base_image=self.base_image,
             image_cmap=image_cmap,
             spines_cmap=spines_cmap,
-            spine_mask_alpha=spine_mask_alpha)
+            spine_mask_alpha=spine_mask_alpha,
+            enumerate=enumerate,
+            enumerate_fontsize=enumerate_fontsize,
+            fontsize=fontsize)
 
     def plot_dFF(
             self,
