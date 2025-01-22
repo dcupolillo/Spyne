@@ -30,7 +30,7 @@ def process_prediction(
     Parameters
     ----------
     roi : object
-        Region of interest object containing metadata (e.g., ROI index and transformations).
+        Single region of interest object containing metadata
     spine_prediction : np.ndarray
         Neural network prediction array for spine segmentation.
     dendrite_prediction : np.ndarray
@@ -173,7 +173,9 @@ def process_prediction(
                 'roi_n': roi.roi_index,
                 'roi_z': roi.z,
                 'centroid_pix': np.asarray(centroids[spine_n]),
-                'mask': spine
+                'mask': spine,
+                'branch_id': roi.branch_id,
+                'branch_degree': roi.branch_degree
             }
 
     # Extract individual dendrites

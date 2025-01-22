@@ -15,9 +15,9 @@ from spyne.display.events import (
     plot_spine_zscores,
     plot_single_spine_dFF)
 from spyne.display.plot_segmenter import (
-    plot_all_spines,
+    plot_spines_2d,
     plot_events_spines,
-    plot_all_zscore_heatmap,
+    plot_zscore_heatmap,
     spine_sholl)
 from spyne.core.semantic_segmentation.pipeline import semantic_segmentation_pipeline
 from spyne.core.semantic_segmentation.padding import pad_image
@@ -43,7 +43,7 @@ class DatasetSegmenter:
     - Analyzing calcium dynamics within segmented spines.
     - Detecting calcium events using a built-in classifier.
     - Visualizing spines, dendrites, and related data.
-
+  
     Example
     -------
     >>> import spyne
@@ -166,7 +166,9 @@ class DatasetSegmenter:
 
         This method checks for the existence of precomputed `.h5` files in the
         dataset's parent directory. If the files exist, they are loaded into memory.
-        Otherwise, the corresponding attributes are initialized as empty lists.
+        Otherwise, the corresponding attributes are initialized as empty lists or 
+        dynamically generated if sufficient data is available. Newly computed data
+        is saved to `.h5` files for future use.
 
         Attributes Initialized or Updated
         ---------------------------------
@@ -233,19 +235,15 @@ class DatasetSegmenter:
                 except FileNotFoundError:
                     setattr(self, attr, [])
 
-        if self.calcium_events_binary_BLA.size > 0:
-            n_spines_BLA = 0
-            for spine in self.calcium_events_binary_BLA:
-                if sum(spine) > 0:
-                    n_spines_BLA += 1
-            self.n_spines_BLA = n_spines_BLA
 
-        if self.calcium_events_binary_CA3.size > 0:
-            n_spines_CA3 = 0
-            for spine in self.calcium_events_binary_CA3:
-                if sum(spine) > 0:
-                    n_spines_CA3 += 1
-            self.n_spines_CA3 = n_spines_CA3
+        self.n_spines_BLA = sum(
+            1 for spine in self.calcium_events_binary_BLA
+            if sum(spine) > 0)
+
+        self.n_spines_CA3 = sum(
+            1 for spine in self.calcium_events_binary_CA3
+            if sum(spine) > 0)
+
 
     def collect_all_data(self) -> None:
         """
@@ -393,6 +391,80 @@ class DatasetSegmenter:
         else:
             raise StopIteration
 
+    def spines_by_branch(self, branch_id: int) -> list:
+        """
+        Retrieve spines associated with a specific branch ID.
+
+        Parameters
+        ----------
+        branch_id : int
+            Branch ID to filter spines.
+
+        Returns
+        -------
+        list
+            List of spines associated with the specified branch ID.
+            Sublist of self.spines_data.
+        """
+
+        return [
+            spine for spine in self.spines_data
+            if spine['branch_id'] == branch_id]
+    
+    def spines_by_branch_degree(self, branch_degree: int) -> list:
+        """
+        Retrieve spines associated with a specific branch degree.
+
+        Parameters
+        ----------
+        branch_degree : int
+            Branch degree to filter spines.
+
+        Returns
+        -------
+        list
+            List of spines associated with the specified branch degree.
+            Sublist of self.spines_data.
+        """
+
+        return [
+            spine for spine in self.spines_data
+            if spine['branch_degree'] == branch_degree]
+    
+    def spines_by_calcium(
+            self,
+            input_type: str = "BLA",
+            n_event_threshold: int = 1,
+    ) -> list:
+        """
+        Retrieve spines with a minimum number of calcium events.
+        
+        Parameters
+        ----------
+        input_type : str, optional
+            The data type to use for event analysis ('BLA' or 'CA3'). Default is 'BLA'.
+        n_event_threshold : int, optional
+            Minimum number of events required for a spine to be considered active.
+            Default is 1.
+        
+        Returns
+        -------
+        list
+            List of spines with the specified number of calcium events.
+            Sublist of self.spines_data.
+        """
+
+        if input_type == 'BLA':
+            events = self.calcium_events_binary_BLA
+        elif input_type == 'CA3':
+            events = self.calcium_events_binary_CA3
+        else:
+            raise ValueError("Incorrect input type")
+
+        return [
+            spine for spine, event in zip(self.spines_data, events)
+            if sum(event) >= n_event_threshold]
+
     def fetch_spine_data(
             self,
             data_batch: list or np.ndarray,
@@ -455,6 +527,18 @@ class DatasetSegmenter:
             self.zscores_BLA, spine_indices)
         selected_ts_BLA = self.fetch_spine_data(
             self.ts_BLA, spine_indices)
+        selected_calcium_events_BLA = [
+            prob for n, spine in enumerate(self.calcium_events_BLA)
+            for prob in spine if n in spine_indices]
+        selected_calcium_events_CA3 = [
+            prob for n, spine in enumerate(self.calcium_events_CA3)
+            for prob in spine if n in spine_indices]
+        selected_calcium_events_binary_BLA = [
+            prob for n, spine in enumerate(self.calcium_events_binary_BLA)
+            for prob in spine if n in spine_indices]
+        selected_calcium_events_binary_CA3 = [
+            prob for n, spine in enumerate(self.calcium_events_binary_CA3)
+            for prob in spine if n in spine_indices]
 
         selected_spines_data = [
             self.spines_data[i] for i in spine_indices]
@@ -470,21 +554,28 @@ class DatasetSegmenter:
             selected_dFF_BLA,
             selected_zscore_BLA,
             selected_ts_BLA,
-            selected_spines_data,)
+            selected_spines_data,
+            selected_calcium_events_BLA,
+            selected_calcium_events_CA3,
+            selected_calcium_events_binary_BLA,
+            selected_calcium_events_binary_CA3)
 
     def plot_spines(
             self,
+            spines: list = None,
             spine_size: int = 20,
             spine_color: str or tuple = "fuchsia",
             ax: plt.Axes = None,
             fontsize: int = 14,
     ) -> None:
         """
-        Visualize all detected spines of the dataset
+        Visualize detected spines of the dataset
         as scattered dots in the 2D space.
 
         Parameters
         ----------
+        spines : list, optional
+            The list of spines to plot. Default is `self.spines_data`.
         spine_size : int, optional
             Size of the spine markers in the plot. Default is 20.
         spine_color : str | tuple, optional
@@ -501,8 +592,10 @@ class DatasetSegmenter:
             Displays the plot.
         """
 
-        return plot_all_spines(
-            all_spines=self.spines_data,
+        spines = self.spines_data if not spines else spines
+
+        return plot_spines_2d(
+            spines=spines,
             spine_size=spine_size,
             spine_color=spine_color,
             ax=ax,
@@ -510,6 +603,7 @@ class DatasetSegmenter:
 
     def plot_events_spines(
             self,
+            spines: list = None,
             input_type: str = 'BLA',
             n_event_threshold: int = 0,
             spine_size: int = 20,
@@ -523,6 +617,9 @@ class DatasetSegmenter:
 
         Parameters
         ----------
+        spines : list, optional
+            List of spines to consider for plotting.
+            Default is all spines with `self.spines_data`.
         input_type : str, optional
             The data type to use for event analysis ('BLA' or 'CA3'). Default is 'BLA'.
         n_event_threshold : int, optional
@@ -557,6 +654,8 @@ class DatasetSegmenter:
         with the color intensity determined by the `cmap`.
         """
 
+        spines = self.spines_data if not spines else spines
+
         if input_type == 'BLA':
             events = self.calcium_events_binary_BLA
         elif input_type == 'CA3':
@@ -565,7 +664,7 @@ class DatasetSegmenter:
             raise ValueError("Incorrect input type")
 
         return plot_events_spines(
-            all_spines=self.spines_data,
+            spines=spines,
             events=events,
             n_event_threshold=n_event_threshold,
             spine_size=spine_size,
@@ -579,6 +678,7 @@ class DatasetSegmenter:
             morphology: object,
             radius_step: float,
             n_radii: int,
+            spines: list = None,
             input_type: str = None,
             n_event_threshold: int = 0,
             ax: plt.Axes = None,
@@ -657,6 +757,12 @@ class DatasetSegmenter:
         quantify how many spines lie within each radius.
         """
 
+        # TODO: having implemented the choice of passing a subset of spines,
+        # we should update also the passing of events
+        # to reflect the same choice
+
+        spines = self.spines_data if not spines else spines
+
         if not input_type:
             events = None
         elif input_type == 'BLA':
@@ -667,12 +773,12 @@ class DatasetSegmenter:
             raise ValueError("Incorrect input type")
 
         return spine_sholl(
-            all_spines=self.spines_data,
             morphology=morphology,
-            events=events,
-            n_event_threshold=n_event_threshold,
             radius_step=radius_step,
             n_radii=n_radii,
+            spines=spines,
+            events=events,
+            n_event_threshold=n_event_threshold,
             ax=ax,
             ax_sholl_curve=ax_sholl_curve,
             circle_color=circle_color,
@@ -689,6 +795,7 @@ class DatasetSegmenter:
 
     def plot_zscores(
             self,
+            spines: list = None,
             input_type: str = None,
             average: bool = False,
             sort: bool = False,
@@ -696,10 +803,12 @@ class DatasetSegmenter:
             cmap: str = "viridis"
     ) -> None:
         """
-        Plot heatmaps of z-scores for all spines in the dataset.
+        Plot heatmaps of z-scores for spines in the dataset.
 
         Parameters
         ----------
+        spines : list, optional
+            List of spines to plot. Default is None, plotting all spines.
         input_type : str, optional
             Specifies the source of z-scores to plot. Expected values are:
             - "CA3" for CA3 spine z-scores.
@@ -734,8 +843,15 @@ class DatasetSegmenter:
         >>> segmenter.plot_zscores(input_type="CA3", average=True, sort=True)
         """
 
-        return plot_all_zscore_heatmap(
-            all_spines=self,
+        # FIXME: the passed spine_data has no intrinsic spine_index.
+        # A solution could be adding this to the spine_data
+        # or passing the spine_index as a separate list
+        
+        spines = self.spines_data if not spines else spines
+
+        return plot_zscore_heatmap(
+            all_spines_instance=self,
+            spines=spines,
             input_type=input_type,
             average=average,
             sort=sort,
@@ -782,6 +898,10 @@ class RoiSegmenter:
             zscore_BLA: list,
             ts_BLA: list,
             spines_data: list,
+            calcium_events_BLA: list,
+            calcium_events_CA3: list,
+            calcium_events_binary_BLA: list,
+            calcium_events_binary_CA3: list
     ) -> None:
         """
     Initialize the RoiSegmenter instance for a specific ROI.
@@ -812,6 +932,14 @@ class RoiSegmenter:
         Time series data for spines in the BLA region.
     spines_data : list
         Processed spine data from semantic segmentation.
+    calcium_events_BLA : list
+        Calcium event probabilities for spines in the BLA region.
+    calcium_events_CA3 : list
+        Calcium event probabilities for spines in the CA3 region.
+    calcium_events_binary_BLA : list
+        Binarized calcium event probabilities for BLA spines.
+    calcium_events_binary_CA3 : list
+        Binarized calcium event probabilities for CA3 spines.
 
     Attributes
     ----------
@@ -853,6 +981,11 @@ class RoiSegmenter:
         self.ts_BLA = ts_BLA
         self.spines_data = spines_data
         self.params = params
+
+        self.calcium_events_BLA = calcium_events_BLA
+        self.calcium_events_CA3 = calcium_events_CA3
+        self.calcium_events_binary_BLA = calcium_events_binary_BLA
+        self.calcium_events_binary_CA3 = calcium_events_binary_CA3
 
         for key, value in self.roi_metadata.items():
             setattr(self, key, value)

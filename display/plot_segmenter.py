@@ -22,15 +22,20 @@ def collect_centroid_fov(
     List[Tuple[float, float]]
         A 1D list of 'centroid_fov' tuples.
     """
+    if not isinstance(data, list):
+        raise TypeError("data must be a list of dictionaries.")
+    
     centroid_fov_list = []
+    
     for spine in data:
         centroid_fov_list.append(tuple(
             spine['centroid_fov'] + [spine['roi_z']]))
+    
     return centroid_fov_list
 
 
-def plot_all_spines(
-        all_spines: list,
+def plot_spines_2d(
+        spines: list,
         spine_size: int,
         fontsize: int,
         spine_color: str,
@@ -59,8 +64,10 @@ def plot_all_spines(
     -------
     None
     """
-
-    all_centroids = np.array(collect_centroid_fov(all_spines))
+    if not isinstance(spines, list):
+        raise TypeError("spines must be a list of dictionaries.")
+    
+    all_centroids = np.array(collect_centroid_fov(spines))
 
     if len(all_centroids) == 0:
         raise ValueError("No spine data found in the segmenter.")
@@ -87,8 +94,9 @@ def plot_all_spines(
     plt.show()
 
 
-def plot_all_zscore_heatmap(
-        all_spines: object,
+def plot_zscore_heatmap(
+        all_spines_instance: object,
+        spines: list,
         input_type: str,
         average: bool,
         sort: bool,
@@ -141,11 +149,23 @@ def plot_all_zscore_heatmap(
 
     start, end = sort_window
 
+    spine_indices = [
+        n for n, spine in enumerate(all_spines_instance.spines_data)
+        if spine in spines]
+    
     if not input_type:
-        zscore_BLA = all_spines.zscores_BLA
-        ts_BLA = all_spines.ts_BLA
-        zscore_CA3 = all_spines.zscores_CA3
-        ts_CA3 = all_spines.ts_CA3
+        zscore_BLA = [
+            spine for n, spine in enumerate(all_spines_instance.zscores_BLA)
+            if n in spine_indices]
+        ts_BLA = [
+            ts for n, ts in enumerate(all_spines_instance.ts_BLA)
+            if n in spine_indices]
+        zscore_CA3 = [
+            spine for n, spine in enumerate(all_spines_instance.zscores_CA3)
+            if n in spine_indices]
+        ts_CA3 = [
+            ts for n, ts in enumerate(all_spines_instance.ts_CA3)
+            if n in spine_indices]
 
         if average:
             processed_zscores_BLA = np.array(
@@ -167,7 +187,7 @@ def plot_all_zscore_heatmap(
             processed_zscores_CA3 = np.concatenate(zscore_CA3, axis=0)
             processed_timestamps_CA3 = np.concatenate(
                 [np.array(ts) for ts in ts_CA3], axis=0)
-            y_label = f"Sweeps of {len(all_spines.spines_data)} spines"
+            y_label = f"Sweeps of {len(all_spines_instance.spines_data)} spines"
 
         if sort:
             if not sort_window:
@@ -187,26 +207,32 @@ def plot_all_zscore_heatmap(
             processed_timestamps_CA3 = processed_timestamps_CA3[
                 sorted_indices_CA3]
 
-        _, ax_zscore = plt.subplots(1, 2, sharex=True, sharey=True)
+        _, ax_zscore = plt.subplots(
+            1, 2,
+            sharex=True,
+            sharey=True,
+            layout="constrained")
 
         BLA = ax_zscore[0].imshow(
             processed_zscores_BLA,
             aspect='auto',
             cmap=cmap,
-            extent=[np.min(processed_timestamps_BLA),
-                    np.max(processed_timestamps_BLA),
-                    0,
-                    processed_zscores_BLA.shape[0]],
+            extent=[
+                np.min(processed_timestamps_BLA),
+                np.max(processed_timestamps_BLA),
+                0,
+                processed_zscores_BLA.shape[0]],
             interpolation='none')
 
         CA3 = ax_zscore[1].imshow(
             processed_zscores_CA3,
             aspect='auto',
             cmap=cmap,
-            extent=[np.min(processed_timestamps_CA3),
-                    np.max(processed_timestamps_CA3),
-                    0,
-                    processed_zscores_CA3.shape[0]],
+            extent=[
+                np.min(processed_timestamps_CA3),
+                np.max(processed_timestamps_CA3),
+                0,
+                processed_zscores_CA3.shape[0]],
             interpolation='none')
 
         for ax in ax_zscore:
@@ -222,7 +248,6 @@ def plot_all_zscore_heatmap(
             if average:
                 ax.set_yticks([0, len(processed_zscores_BLA)])
 
-        plt.colorbar(BLA, ax=ax_zscore[0], label='Z-score')
         plt.colorbar(CA3, ax=ax_zscore[1], label='Z-score')
         ax_zscore[0].set_xlabel('Time (s)')
         ax_zscore[0].set_ylabel(y_label)
@@ -230,14 +255,21 @@ def plot_all_zscore_heatmap(
 
     else:
         if input_type == 'BLA':
-            zscore = all_spines.zscores_BLA
-            ts = all_spines.ts_BLA
+            selected_zscore = all_spines_instance.zscores_BLA
+            selected_ts = all_spines_instance.ts_BLA
         elif input_type == 'CA3':
-            zscore = all_spines.zscores_CA3
-            ts = all_spines.ts_CA3
+            selected_zscore = all_spines_instance.zscores_CA3
+            selected_ts = all_spines_instance.ts_CA3
         else:
             raise ValueError(
                 "Invalid input_type. Must be 'BLA', 'CA3', or None.")
+        
+        zscore = [
+                spine for n, spine in enumerate(selected_zscore)
+                if n in spine_indices]
+        ts = [
+            ts for n, ts in enumerate(selected_ts)
+            if n in spine_indices]
 
         if average:
             processed_zscores = np.array(
@@ -249,7 +281,7 @@ def plot_all_zscore_heatmap(
             processed_zscores = np.concatenate(zscore, axis=0)
             processed_timestamps = np.concatenate(
                 [np.array(t) for t in ts], axis=0)
-            y_label = f"Sweeps of {len(all_spines.spines_data)} spines"
+            y_label = f"Sweeps of {len(all_spines_instance.spines_data)} spines"
 
         if sort:
             sorting_values = np.array(
@@ -293,7 +325,7 @@ def plot_all_zscore_heatmap(
 
 
 def plot_events_spines(
-        all_spines: list,
+        spines: list,
         events: list,
         n_event_threshold: int,
         spine_size: int,
@@ -303,11 +335,14 @@ def plot_events_spines(
         cmap: str,
 ) -> None:
 
+    if not isinstance(spines, list):
+        raise TypeError("spines must be a list of dictionaries.")
+    
     if n_event_threshold > len(events[0]):
         raise ValueError(
             f"n_event_threshold should be <= {len(events[0])}")
 
-    all_centroids = np.array(collect_centroid_fov(all_spines))
+    all_centroids = np.array(collect_centroid_fov(spines))
 
     if len(all_centroids) == 0:
         raise ValueError("No spine data found.")
@@ -360,12 +395,12 @@ def plot_events_spines(
 
 
 def spine_sholl(
-        all_spines: dict,
         morphology: object,
-        events: list,
-        n_event_threshold: int,
         radius_step: float,
         n_radii: int,
+        spines: list,
+        events: list,
+        n_event_threshold: int,
         ax: plt.Axes = None,
         ax_sholl_curve: plt.Axes = None,
         circle_color: str = None,
@@ -386,7 +421,7 @@ def spine_sholl(
     center_point = (soma.x, soma.y, soma.z)
 
     # Get spine centroids and event counts
-    all_centroids = np.array(collect_centroid_fov(all_spines))
+    all_centroids = np.array(collect_centroid_fov(spines))
 
     if events:
         event_counts = [sum(flags) for flags in events]

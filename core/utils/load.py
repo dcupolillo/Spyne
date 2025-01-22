@@ -18,6 +18,16 @@ def load_metadata_from_tiff(
         rect.rectangle_period
         for zplane in dataset_instance.sf.neuComp
         for rect in zplane]
+    
+    branch_degrees = [
+        rect.branch_degree
+        for zplane in dataset_instance.sf.neuComp
+        for rect in zplane]
+    
+    branch_ids = [
+        rect.branch_id
+        for zplane in dataset_instance.sf.neuComp
+        for rect in zplane]
 
     unique_roifile_list = list(
         {file_path.parent: file_path
@@ -38,9 +48,10 @@ def load_metadata_from_tiff(
 
     dataset_instance.n_sweeps = [len(n) for n in grouped_sweeps]
 
-    dataset_instance.coplanar_n = [rect.z_ind
-                                   for zplane in dataset_instance.sf.neuComp
-                                   for rect in zplane]
+    dataset_instance.coplanar_n = [
+        rect.z_ind
+        for zplane in dataset_instance.sf.neuComp
+        for rect in zplane]
 
     # Retrieve metadata
     n_roi = 0
@@ -63,7 +74,7 @@ def load_metadata_from_tiff(
 
             rois = [rois] if isinstance(rois, dict) else rois
 
-            for roi in rois:
+            for r, roi in enumerate(rois):
 
                 z = float(roi['name'].split(",")[0].split(" = ")[-1])
 
@@ -107,6 +118,8 @@ def load_metadata_from_tiff(
                     'z': z,
                     'z_ind': n,
                     'n_roi': n_roi,
+                    'branch_degree': branch_degrees[r],
+                    'branch_id': branch_ids[r],
                     'n_sweeps': dataset_instance.n_sweeps[n],
                     'n_frames':
                         frame_data['SI.hStackManager.framesPerSlice'],
