@@ -74,7 +74,7 @@ def load_metadata_from_tiff(
 
             rois = [rois] if isinstance(rois, dict) else rois
 
-            for r, roi in enumerate(rois):
+            for roi in rois:
 
                 z = float(roi['name'].split(",")[0].split(" = ")[-1])
 
@@ -118,8 +118,8 @@ def load_metadata_from_tiff(
                     'z': z,
                     'z_ind': n,
                     'n_roi': n_roi,
-                    'branch_degree': branch_degrees[r],
-                    'branch_id': branch_ids[r],
+                    'branch_degree': branch_degrees[n_roi],
+                    'branch_id': branch_ids[n_roi],
                     'n_sweeps': dataset_instance.n_sweeps[n],
                     'n_frames':
                         frame_data['SI.hStackManager.framesPerSlice'],

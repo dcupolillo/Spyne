@@ -50,12 +50,16 @@ class ZScoreClassifier(nn.Module):
 
     def forward(self, x):
 
+        # First convolutional layer
+        residual = x
         x = self.conv1(x)
         x = F.relu(x)
         x = self.dropout(x)
 
+        # Second convolutional layer with skip connection
         x = self.conv2(x)
         x = F.relu(x)
+        x = x + residual  # Add skip connection
         x = self.pool(x)
 
         # Flatten
@@ -68,7 +72,6 @@ class ZScoreClassifier(nn.Module):
 
         x = self.fc2(x)
         x = F.relu(x)
-        x = self.dropout(x)
 
         x = self.fc3(x)
         x = torch.sigmoid(x)

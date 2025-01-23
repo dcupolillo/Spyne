@@ -84,6 +84,7 @@ def detect_calcium_events(
     AssertionError
         If the length of event flags does not match the corresponding spine data.
     """
+    
     model_path = config['classifier_model_fn']
     output_folder = Path(output_folder)
 

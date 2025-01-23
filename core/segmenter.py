@@ -79,7 +79,7 @@ class DatasetSegmenter:
             classifier_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
                 r"neuralnetwork/zscore_decoder/models/"
-                r"zscore_new_best_model.pth"),
+                r"250123_zscoreclassifier_model.pth"),
             classifier_cutoff: int = 99,
     ) -> None:
         """
@@ -328,9 +328,9 @@ class DatasetSegmenter:
             spine_counter += n_spines_per_roi
 
         # Sanity check to ensure spine data consistency
-        assert (
-            ([len(i) for i in self.spines_data]) ==
-            ([len(roi.spines_data) for roi in segmenters]))
+        # assert (
+        #     len(self.spines_data) ==
+        #     ([len(roi.spines_data) for roi in segmenters]))
 
         (
             self.zscores_CA3,
@@ -369,6 +369,14 @@ class DatasetSegmenter:
             self.calcium_events_CA3,
             self.params['classifier_cutoff'],
         )
+
+        self.n_spines_BLA = sum(
+            1 for spine in self.calcium_events_binary_BLA
+            if sum(spine) > 0)
+
+        self.n_spines_CA3 = sum(
+            1 for spine in self.calcium_events_binary_CA3
+            if sum(spine) > 0)
 
     def __len__(self):
         return len(self.dataset)

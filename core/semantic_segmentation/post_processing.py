@@ -170,12 +170,15 @@ def process_prediction(
     for spine_n, spine in enumerate(spine_single_labels):
         if spine is not None:
             spines_dicts[spine_n] = {
+                'spine_index': spine_n,
                 'roi_n': roi.roi_index,
                 'roi_z': roi.z,
                 'centroid_pix': np.asarray(centroids[spine_n]),
                 'mask': spine,
                 'branch_id': roi.branch_id,
-                'branch_degree': roi.branch_degree
+                'branch_degree': roi.branch_degree,
+                'spine_area_pix': np.sum(spine),
+                'spine_area_um': np.sum(spine) * roi.roi.resolution[0]
             }
 
     # Extract individual dendrites
