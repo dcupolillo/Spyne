@@ -178,7 +178,12 @@ def process_prediction(
                 'branch_id': roi.branch_id,
                 'branch_degree': roi.branch_degree,
                 'spine_area_pix': np.sum(spine),
-                'spine_area_um': np.sum(spine) * roi.roi.resolution[0]
+                'spine_area_um': (
+                    np.sum(spine) *
+                    roi.roi_metadata['resolution'][0] *
+                    roi.roi_metadata['resolution'][1]
+                )
+
             }
 
     # Extract individual dendrites
@@ -227,9 +232,16 @@ def process_prediction(
         roi.center_xy,
         roi.pixel_resolution_xy)
 
-    spines_dicts = [{**spine, 'centroid_fov': centroid.tolist()}
-                    for spine, centroid in zip(
-                        spines_dicts, centroids_fov)]
+    spines_dicts = [
+        {
+            **spine,
+            'centroid_fov': centroid.tolist(),
+            'centroid_fov_um': [
+                coord * roi.roi.roi_metadata['objective resolution']
+                for coord in centroid.tolist()]
+        }
+        for spine, centroid in zip(spines_dicts, centroids_fov)
+    ]
 
     # spines_dicts = [{**spine, 'centroid_fov_um': centroid.tolist()}
     #                 for spine, centroid in zip(

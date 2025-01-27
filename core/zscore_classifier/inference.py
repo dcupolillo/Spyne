@@ -53,36 +53,37 @@ def is_calcium_event(
 
 def detect_calcium_events(
         config: dict,
-        batch_z_scores_BLA: list,
-        batch_z_scores_CA3: list,
+        zscores_BLA: list,
+        zscores_CA3: list,
+        save: bool,
         output_folder: str or Path
 ) -> None:
     """
-    Detect calcium events in spines using a trained neural network.
+    Detect calcium events in spines using a trained neural network classifier.
+
+    This function takes a list of z-scored calcium traces from BLA and CA3 spines,
+    and performs inference using a pre-trained neural network classifier to detect
+    calcium events. The output is a list of probabilities for each sweep in each spine.
 
     Parameters
     ----------
-    model_path : str, optional
-        Path to the trained model for calcium event detection. Default is
-        'zscore_best_model.pth'.
+    config : dict
+        A dictionary containing the configuration parameters for the classifier model.
+    zscores_BLA : list
+        A nested list where each element corresponds to a spine, and each spine contains
+        a list of z-scored calcium traces from BLA.
+    zscores_CA3 : list
+        A nested list where each element corresponds to a spine, and each spine contains
+        a list of z-scored calcium traces from CA3.
+    save : bool, optional
+        Whether to save the calcium event probabilities to disk.
+    output_folder : str or Path
+        The folder where the calcium event probabilities will be saved.
 
-    Attributes Updated
-    ------------------
-    calcium_events_BLA : list
-        Flags indicating calcium events for BLA spines.
-    calcium_events_CA3 : list
-        Flags indicating calcium events for CA3 spines.
-
-    Notes
-    -----
-    - This method processes z-scores of spines using a neural network and
-    identifies calcium events based on the model's predictions.
-    - Results are saved as `.h5` files in the dataset's parent folder.
-
-    Raises
-    ------
-    AssertionError
-        If the length of event flags does not match the corresponding spine data.
+    Returns
+    -------
+    tuple
+        A tuple containing the calcium event probabilities for BLA and CA3 spines.
     """
     
     model_path = config['classifier_model_fn']
@@ -96,7 +97,7 @@ def detect_calcium_events(
     model.to(device)
 
     # Process BLA
-    for spine in tqdm(batch_z_scores_BLA, desc="Analyzing BLA spines"):
+    for spine in tqdm(zscores_BLA, desc="Analyzing BLA spines"):
         probabilities_BLA = []
 
         for sweep in spine:
@@ -105,7 +106,7 @@ def detect_calcium_events(
         calcium_events_BLA.append(probabilities_BLA)
 
     # Process CA3
-    for spine in tqdm(batch_z_scores_CA3, desc="Analyzing CA3 spines"):
+    for spine in tqdm(zscores_CA3, desc="Analyzing CA3 spines"):
         probabilities_CA3 = []
         for sweep in spine:
             probabilities_CA3.append(
@@ -113,27 +114,35 @@ def detect_calcium_events(
         calcium_events_CA3.append(probabilities_CA3)
 
     # Sanity check
-    assert len(calcium_events_BLA) == len(batch_z_scores_BLA)
+    assert len(calcium_events_BLA) == len(zscores_BLA)
     for spine_probs, spine_traces in zip(
-            calcium_events_BLA, batch_z_scores_BLA):
+            calcium_events_BLA, zscores_BLA):
         assert len(spine_probs) == len(spine_traces)
 
-    if calcium_events_BLA:
-        fl.save(Path(output_folder, 'calcium_event_BLA.h5'), calcium_events_BLA)
+    if save and output_folder:
+        if calcium_events_BLA:
+            fl.save(
+                Path(output_folder, 'calcium_events_BLA.h5'),
+                calcium_events_BLA)
 
-    if calcium_events_CA3:
-        fl.save(Path(output_folder, 'calcium_event_CA3.h5'), calcium_events_CA3)
+        if calcium_events_CA3:
+            fl.save(
+                Path(output_folder, 'calcium_events_CA3.h5'),
+                calcium_events_CA3)
 
     return calcium_events_BLA, calcium_events_CA3
 
 
 def binarize_calcium_events_array(
-        calcium_events: list,
-        percentile: int
+        calcium_events_BLA: list,
+        calcium_events_CA3: list,
+        percentile: int,
+        save: bool,
+        output_folder: str or Path
 ) -> tuple:
     """
-    Binarize calcium event probabilities based on a dynamic threshold
-    that depends on a percentile of the distribution of probabilities.
+    Binarize calcium event probabilities for BLA and CA3 events based on
+    a percentile-based dynamic threshold of the distribution of probabilities.
 
     This function takes a list of calcium event probabilities, computes a 
     dynamic threshold based on a specified percentile, and binarizes the 
@@ -142,12 +151,19 @@ def binarize_calcium_events_array(
 
     Parameters
     ----------
-    calcium_events : list
+    calcium_events_BLA : list
         A nested list where each element corresponds to a spine, and each 
-        spine contains a list of sweep probabilities.
+        spine contains a list of probabilities of having a BLA event.
+    calcium_events_CA3 : list
+        A nested list where each element corresponds to a spine, and each
+        spine contains a list of probabilities of having a CA3 event.
     percentile : int
         The percentile value used to compute the dynamic threshold. For example, 
         a value of 99 will compute the 99th percentile.
+    save : bool, optional
+        Whether to save the binarized calcium events to disk.
+    output_folder : str or Path
+        The folder where the binarized calcium events will be saved.
 
     Returns
     -------
@@ -167,18 +183,47 @@ def binarize_calcium_events_array(
       trace binarized values back to their respective spines and sweeps.
     """
 
-    probabilities = np.array(
-        [sweep for spine in calcium_events for sweep in spine])
-    probabilities = probabilities[~np.isnan(probabilities)]
+    probabilities_BLA = np.array(
+        [sweep for spine in calcium_events_BLA for sweep in spine])
+    probabilities_BLA = probabilities_BLA[~np.isnan(probabilities_BLA)]
 
-    decision_boundary = np.percentile(probabilities, percentile)
+    probabilities_CA3 = np.array(
+        [sweep for spine in calcium_events_CA3 for sweep in spine])
+    probabilities_CA3 = probabilities_CA3[~np.isnan(probabilities_CA3)]
 
-    binary_calcium_events = np.zeros_like(
-        calcium_events, dtype=int)
+    decision_boundary_BLA = np.percentile(probabilities_BLA, percentile)
+    decision_boundary_CA3 = np.percentile(probabilities_CA3, percentile)
 
-    for i, spine in enumerate(calcium_events):
+    calcium_events_binary_BLA = np.zeros_like(
+        calcium_events_BLA, dtype=int)
+    
+    calcium_events_binary_CA3 = np.zeros_like(
+        calcium_events_CA3, dtype=int)
+
+    for i, spine in enumerate(calcium_events_BLA):
         for n, sweep in enumerate(spine):
-            if sweep >= decision_boundary:
-                binary_calcium_events[i][n] = int(1)
+            if sweep >= decision_boundary_BLA:
+                calcium_events_binary_BLA[i][n] = int(1)
 
-    return decision_boundary, binary_calcium_events
+    for i, spine in enumerate(calcium_events_CA3):
+        for n, sweep in enumerate(spine):
+            if sweep >= decision_boundary_CA3:
+                calcium_events_binary_CA3[i][n] = int(1)
+
+    if save and output_folder:
+        if calcium_events_binary_BLA is not None:
+            fl.save(
+                Path(output_folder, 'calcium_events_binary_BLA.h5'),
+                calcium_events_binary_BLA)
+
+        if calcium_events_binary_CA3 is not None:
+            fl.save(
+                Path(output_folder, 'calcium_events_binary_CA3.h5'),
+                calcium_events_binary_CA3)
+
+    return (
+        decision_boundary_BLA,
+        calcium_events_binary_BLA,
+        decision_boundary_CA3,
+        calcium_events_binary_CA3
+    )

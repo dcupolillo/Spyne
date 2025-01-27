@@ -6,7 +6,8 @@ import matplotlib.pyplot as plt
 
 
 def collect_centroid_fov(
-        data: list
+        data: list,
+        scan_angle: bool,
 ) -> list:
     """
     Collects all 'centroid_fov' tuples from a 2D list of dictionaries
@@ -16,6 +17,8 @@ def collect_centroid_fov(
     ----------
     data : List[List[dict]]
         A 2D list of dictionaries containing 'centroid_fov' keys.
+    scan_angle : bool
+        If True, the 'centroid_fov' tuples are in scan angle degree units.
 
     Returns
     -------
@@ -27,9 +30,11 @@ def collect_centroid_fov(
     
     centroid_fov_list = []
     
+    unit = 'centroid_fov' if scan_angle else 'centroid_fov_um'
+
     for spine in data:
         centroid_fov_list.append(tuple(
-            spine['centroid_fov'] + [spine['roi_z']]))
+            spine[unit] + [spine['roi_z']]))
     
     return centroid_fov_list
 
@@ -39,7 +44,8 @@ def plot_spines_2d(
         spine_size: int,
         fontsize: int,
         spine_color: str,
-        ax: plt.Axes = None,
+        ax: plt.Axes,
+        scan_angle: bool,
 ) -> None:
     """
     Plot all spine centroids from the segmenter as scattered dots.
@@ -54,6 +60,8 @@ def plot_spines_2d(
         Color of the scatter points, by default 'cyan'.
     ax : matplotlib.axes.Axes, optional
         Matplotlib Axes object to plot on. If None, a new figure is created.
+    scan_angle : bool, optional
+        If True, plot in scan angle degree units. Default is False.
 
     Raises
     ------
@@ -67,7 +75,8 @@ def plot_spines_2d(
     if not isinstance(spines, list):
         raise TypeError("spines must be a list of dictionaries.")
     
-    all_centroids = np.array(collect_centroid_fov(spines))
+    all_centroids = np.array(
+        collect_centroid_fov(spines, scan_angle=scan_angle))
 
     if len(all_centroids) == 0:
         raise ValueError("No spine data found in the segmenter.")
@@ -333,6 +342,7 @@ def plot_events_spines(
         ax: plt.Axes,
         show_cmap: bool,
         cmap: str,
+        scan_angle: bool,
 ) -> None:
 
     if not isinstance(spines, list):
@@ -342,7 +352,8 @@ def plot_events_spines(
         raise ValueError(
             f"n_event_threshold should be <= {len(events[0])}")
 
-    all_centroids = np.array(collect_centroid_fov(spines))
+    all_centroids = np.array(
+        collect_centroid_fov(spines, scan_angle=scan_angle))
 
     if len(all_centroids) == 0:
         raise ValueError("No spine data found.")

@@ -18,16 +18,6 @@ def load_metadata_from_tiff(
         rect.rectangle_period
         for zplane in dataset_instance.sf.neuComp
         for rect in zplane]
-    
-    branch_degrees = [
-        rect.branch_degree
-        for zplane in dataset_instance.sf.neuComp
-        for rect in zplane]
-    
-    branch_ids = [
-        rect.branch_id
-        for zplane in dataset_instance.sf.neuComp
-        for rect in zplane]
 
     unique_roifile_list = list(
         {file_path.parent: file_path
@@ -54,13 +44,13 @@ def load_metadata_from_tiff(
         for rect in zplane]
 
     # Retrieve metadata
-    n_roi = 0
+    n_roi_overall = 0
     coplanar_dict = {}
 
-    for n, file_path in enumerate(
+    for file_n, file_path in enumerate(
             tqdm(unique_roifile_list, desc="Loading metadata")):
 
-        abf_file = dataset_instance.abf_file_list[n]
+        abf_file = dataset_instance.abf_file_list[file_n]
         adc_list = get_digital_output_list(abf_file)
 
         with tifffile.TiffFile(file_path) as tif:
@@ -74,7 +64,7 @@ def load_metadata_from_tiff(
 
             rois = [rois] if isinstance(rois, dict) else rois
 
-            for roi in rois:
+            for n_roi_in_z, roi in enumerate(rois):
 
                 z = float(roi['name'].split(",")[0].split(" = ")[-1])
 
@@ -98,7 +88,12 @@ def load_metadata_from_tiff(
 
                 if z not in coplanar_dict:
                     coplanar_dict[z] = []
-                coplanar_dict[z].append(n_roi)
+                coplanar_dict[z].append(n_roi_overall)
+
+                branch_degree = (
+                    dataset_instance.sf.neuComp[file_n][n_roi_in_z].branch_degree)
+                branch_id = (
+                    dataset_instance.sf.neuComp[file_n][n_roi_in_z].branch_id)
 
                 metadata.append({
                     'objective resolution':
@@ -116,16 +111,16 @@ def load_metadata_from_tiff(
                     'size_xy': scanfield['sizeXY'],
                     'resolution': resolution,
                     'z': z,
-                    'z_ind': n,
-                    'n_roi': n_roi,
-                    'branch_degree': branch_degrees[n_roi],
-                    'branch_id': branch_ids[n_roi],
-                    'n_sweeps': dataset_instance.n_sweeps[n],
+                    'z_ind': file_n,
+                    'n_roi': n_roi_overall,
+                    'branch_degree': branch_degree,
+                    'branch_id': branch_id,
+                    'n_sweeps': dataset_instance.n_sweeps[file_n],
                     'n_frames':
                         frame_data['SI.hStackManager.framesPerSlice'],
                     'frame_rate':
                         frame_data['SI.hRoiManager.scanFrameRate'],
-                    'rectangle_period': rect_periods[n_roi],
+                    'rectangle_period': rect_periods[n_roi_overall],
                     'flyto':
                         frame_data['SI.hScan2D.flytoTimePerScanfield'],
                     'flyback':
@@ -138,10 +133,11 @@ def load_metadata_from_tiff(
                         frame_data['SI.hChannels.channelSubtractOffset'],
                     'input_range':
                         frame_data['SI.hChannels.channelInputRange'],
-                    'median_filter_kernel_size': dataset_instance.median_filter_kernel_size,
+                    'median_filter_kernel_size': (
+                        dataset_instance.median_filter_kernel_size),
                 })
 
-                n_roi += 1
+                n_roi_overall += 1
 
     for meta in metadata:
         z = meta['z']
@@ -152,7 +148,7 @@ def load_metadata_from_tiff(
     for meta in metadata:
         grouped_metadata[meta['z_ind']].append(meta)
 
-    n_rois = len(metadata)
+    n_roi_overalls = len(metadata)
 
     for group in grouped_metadata:
         start_y = 0
@@ -165,7 +161,7 @@ def load_metadata_from_tiff(
                        for group in grouped_metadata
                        for meta in group]
 
-    return n_rois, output_metadata
+    return n_roi_overalls, output_metadata
 
 
 def load_imaging_data_from_tiff(

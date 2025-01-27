@@ -235,6 +235,7 @@ class DatasetSegmenter:
                 except FileNotFoundError:
                     setattr(self, attr, [])
 
+        self.n_spines = len(self.spines_data)
 
         self.n_spines_BLA = sum(
             1 for spine in self.calcium_events_binary_BLA
@@ -352,22 +353,21 @@ class DatasetSegmenter:
             self.params,
             self.zscores_BLA,
             self.zscores_CA3,
-            self.dataset.folder.parent
+            save=True
+            output_folder=self.dataset.folder.parent
         )
 
         (
             self.dynamic_threshold_BLA,
-            self.calcium_events_binary_BLA
-        ) = binarize_calcium_events_array(
-            self.calcium_events_BLA,
-            self.params['classifier_cutoff'],
-        )
-        (
+            self.calcium_events_binary_BLA,
             self.dynamic_threshold_CA3,
             self.calcium_events_binary_CA3
         ) = binarize_calcium_events_array(
+            self.calcium_events_BLA,
             self.calcium_events_CA3,
             self.params['classifier_cutoff'],
+            save=True
+            output_folder=self.dataset.folder.parent
         )
 
         self.n_spines_BLA = sum(
@@ -575,6 +575,8 @@ class DatasetSegmenter:
             spine_color: str or tuple = "fuchsia",
             ax: plt.Axes = None,
             fontsize: int = 14,
+            scan_angle: bool = False,
+            **kwargs,
     ) -> None:
         """
         Visualize detected spines of the dataset
@@ -593,6 +595,9 @@ class DatasetSegmenter:
             Default is None.
         fontsize : int, optional
             Font size for annotations. Default is 10.
+        scan_angle : bool, optional
+            Whether to display the plot in scan angle degree units.
+            Default is False.
 
         Returns
         -------
@@ -607,7 +612,9 @@ class DatasetSegmenter:
             spine_size=spine_size,
             spine_color=spine_color,
             ax=ax,
-            fontsize=fontsize)
+            fontsize=fontsize,
+            scan_angle=scan_angle,
+            **kwargs)
 
     def plot_events_spines(
             self,
@@ -619,6 +626,8 @@ class DatasetSegmenter:
             fontsize: int = 14,
             cmap: str = 'viridis',
             show_cmap: bool = True,
+            scan_angle: bool = False,
+            **kwargs
     ) -> None:
         """
         Plot putative "active" spines with event-based coloring.
@@ -644,6 +653,8 @@ class DatasetSegmenter:
             Colormap used to represent the event counts for each spine. Default is 'viridis'.
         show_cmap : bool, optional
             Whether to display the colormap bar alongside the plot. Default is True.
+        scan_angle : bool, optional
+            Whether to display the plot in scan angle degree units. Default is False
 
         Returns
         -------
@@ -679,7 +690,9 @@ class DatasetSegmenter:
             ax=ax,
             fontsize=fontsize,
             cmap=cmap,
-            show_cmap=show_cmap)
+            show_cmap=show_cmap,
+            scan_angle=scan_angle,
+            **kwargs)
 
     def sholl(
             self,
@@ -701,7 +714,8 @@ class DatasetSegmenter:
             size: int or float = 60,
             fontsize: int = 12,
             cmap: str = 'viridis',
-            colorbar_orientation: str = 'vertical'
+            colorbar_orientation: str = 'vertical',
+            **kwargs
     ) -> np.ndarray:
         """
         Perform a Sholl analysis of spines.
@@ -799,7 +813,8 @@ class DatasetSegmenter:
             size=size,
             fontsize=fontsize,
             cmap=cmap,
-            colorbar_orientation=colorbar_orientation)
+            colorbar_orientation=colorbar_orientation,
+            **kwargs)
 
     def plot_zscores(
             self,
@@ -808,7 +823,8 @@ class DatasetSegmenter:
             average: bool = False,
             sort: bool = False,
             sort_window: tuple = (16, 21),
-            cmap: str = "viridis"
+            cmap: str = "viridis",
+            **kwargs
     ) -> None:
         """
         Plot heatmaps of z-scores for spines in the dataset.
@@ -864,7 +880,8 @@ class DatasetSegmenter:
             average=average,
             sort=sort,
             sort_window=sort_window,
-            cmap=cmap)
+            cmap=cmap,
+            **kwargs)
 
 
 class RoiSegmenter:

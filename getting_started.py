@@ -5,7 +5,7 @@ import spyne
 from neuronpath.path import neuronpath
 
 # Choose the structure to be analyzed
-paths = neuronpath('240813', 1)
+paths = neuronpath('240916', 1)
 
 # Initialize the dataset and segmenter to identify spines
 dataset = spyne.ImagingDataset(paths)
