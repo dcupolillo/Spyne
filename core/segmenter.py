@@ -19,10 +19,12 @@ from spyne.display.plot_segmenter import (
     plot_events_spines,
     plot_zscore_heatmap,
     spine_sholl)
-from spyne.core.semantic_segmentation.pipeline import semantic_segmentation_pipeline
+from spyne.core.semantic_segmentation.pipeline import (
+    semantic_segmentation_pipeline)
 from spyne.core.semantic_segmentation.padding import pad_image
 from spyne.core.semantic_segmentation.inference import inference
-from spyne.core.semantic_segmentation.post_processing import process_predictions
+from spyne.core.semantic_segmentation.post_processing import (
+    process_predictions)
 from spyne.core.zscore_classifier.timeseries_pipeline import collect_timeseries
 from spyne.core.zscore_classifier.inference import (
     detect_calcium_events,
@@ -43,7 +45,7 @@ class DatasetSegmenter:
     - Analyzing calcium dynamics within segmented spines.
     - Detecting calcium events using a built-in classifier.
     - Visualizing spines, dendrites, and related data.
-  
+
     Example
     -------
     >>> import spyne
@@ -105,14 +107,16 @@ class DatasetSegmenter:
         min_dendrite_size : float, optional
             Minimum size for dendrites. Default is 15.
         dendrite_dilation_iterations : int, optional
-            Number of dilation iterations for dendrite segmentation. Default is 12.
+            Number of dilation iterations for dendrite segmentation.
+            Default is 12.
         kernel_size : int, optional
             Kernel size for morphological operations. Default is 3.
         classifier_model_fn : str or Path, optional
             Path to the trained model file for calcium event classification.
             Default is "zscore_best_model.pth"
         classifier_cutoff : int, optional
-            percentile value to determine calcium probability decision boundary.
+            Percentile value to determine calcium event
+            probability decision boundary.
             Default is 99.
 
         Raises
@@ -165,10 +169,10 @@ class DatasetSegmenter:
         Load precomputed data (if available) for faster analysis.
 
         This method checks for the existence of precomputed `.h5` files in the
-        dataset's parent directory. If the files exist, they are loaded into memory.
-        Otherwise, the corresponding attributes are initialized as empty lists or 
-        dynamically generated if sufficient data is available. Newly computed data
-        is saved to `.h5` files for future use.
+        dataset's parent directory. If the files exist, they are loaded
+        into memory. Otherwise, the corresponding attributes are initialized
+        as empty lists or dynamically generated if sufficient data is
+        available. Newly computed data is saved to `.h5` files for future use.
 
         Attributes Initialized or Updated
         ---------------------------------
@@ -245,7 +249,6 @@ class DatasetSegmenter:
             1 for spine in self.calcium_events_binary_CA3
             if sum(spine) > 0)
 
-
     def collect_all_data(self) -> None:
         """
         Collect and process spine and dendrite segmentation
@@ -294,10 +297,10 @@ class DatasetSegmenter:
 
         Notes
         -----
-        - Spine and dendrite segmentation is performed using a deep learning model
-        configured in `self.params`.
-        - Timeseries data collection extracts relevant information (e.g., z-scores, dF/F)
-        for all spines detected during segmentation.
+        - Spine and dendrite segmentation is performed using a deep learning
+        model configured in `self.params`.
+        - Timeseries data collection extracts relevant information
+        (e.g., z-scores, dF/F) for all spines detected during segmentation.
         """
 
         (
@@ -353,7 +356,7 @@ class DatasetSegmenter:
             self.params,
             self.zscores_BLA,
             self.zscores_CA3,
-            save=True
+            save=True,
             output_folder=self.dataset.folder.parent
         )
 
@@ -366,7 +369,7 @@ class DatasetSegmenter:
             self.calcium_events_BLA,
             self.calcium_events_CA3,
             self.params['classifier_cutoff'],
-            save=True
+            save=True,
             output_folder=self.dataset.folder.parent
         )
 
@@ -418,7 +421,7 @@ class DatasetSegmenter:
         return [
             spine for spine in self.spines_data
             if spine['branch_id'] == branch_id]
-    
+
     def spines_by_branch_degree(self, branch_degree: int) -> list:
         """
         Retrieve spines associated with a specific branch degree.
@@ -438,7 +441,7 @@ class DatasetSegmenter:
         return [
             spine for spine in self.spines_data
             if spine['branch_degree'] == branch_degree]
-    
+
     def spines_by_calcium(
             self,
             input_type: str = "BLA",
@@ -446,15 +449,16 @@ class DatasetSegmenter:
     ) -> list:
         """
         Retrieve spines with a minimum number of calcium events.
-        
+
         Parameters
         ----------
         input_type : str, optional
-            The data type to use for event analysis ('BLA' or 'CA3'). Default is 'BLA'.
+            The data type to use for event analysis ('BLA' or 'CA3').
+            Default is 'BLA'.
         n_event_threshold : int, optional
-            Minimum number of events required for a spine to be considered active.
-            Default is 1.
-        
+            Minimum number of events required for a spine to be
+            considered active. Default is 1.
+
         Returns
         -------
         list
@@ -479,7 +483,8 @@ class DatasetSegmenter:
             spine_indices: list
     ) -> np.ndarray:
         """
-        Helper function to retrieve data from a given ROI based on spine indices.
+        Helper function to retrieve data from a given ROI based on
+        spine indices.
 
         Parameters
         ----------
@@ -509,7 +514,8 @@ class DatasetSegmenter:
         Returns
         -------
         RoiSegmenter
-            An instance containing individual ROI data, metadata, and segmentation.
+            An instance containing individual ROI data, metadata, and
+            segmentation.
 
         Raises
         ------
@@ -573,6 +579,7 @@ class DatasetSegmenter:
             spines: list = None,
             spine_size: int = 20,
             spine_color: str or tuple = "fuchsia",
+            spine_edgecolor: str or tuple = None,
             ax: plt.Axes = None,
             fontsize: int = 14,
             scan_angle: bool = False,
@@ -611,6 +618,7 @@ class DatasetSegmenter:
             spines=spines,
             spine_size=spine_size,
             spine_color=spine_color,
+            spine_edgecolor=spine_edgecolor,
             ax=ax,
             fontsize=fontsize,
             scan_angle=scan_angle,
@@ -622,11 +630,14 @@ class DatasetSegmenter:
             input_type: str = 'BLA',
             n_event_threshold: int = 0,
             spine_size: int = 20,
-            ax=None,
+            spine_edgecolor: str = None,
+            ax: plt.Axes = None,
             fontsize: int = 14,
             cmap: str = 'viridis',
             show_cmap: bool = True,
+            cbar_width: float = 0.8,
             scan_angle: bool = False,
+            zorder: int = 1,
             **kwargs
     ) -> None:
         """
@@ -655,6 +666,8 @@ class DatasetSegmenter:
             Whether to display the colormap bar alongside the plot. Default is True.
         scan_angle : bool, optional
             Whether to display the plot in scan angle degree units. Default is False
+        zorder : int, optional
+            Increase to plot on top. Default is 1.
 
         Returns
         -------
@@ -687,11 +700,14 @@ class DatasetSegmenter:
             events=events,
             n_event_threshold=n_event_threshold,
             spine_size=spine_size,
+            spine_edgecolor=spine_edgecolor,
             ax=ax,
             fontsize=fontsize,
             cmap=cmap,
             show_cmap=show_cmap,
+            cbar_width=cbar_width,
             scan_angle=scan_angle,
+            zorder=zorder,
             **kwargs)
 
     def sholl(

@@ -170,7 +170,6 @@ def process_prediction(
     for spine_n, spine in enumerate(spine_single_labels):
         if spine is not None:
             spines_dicts[spine_n] = {
-                'spine_index': spine_n,
                 'roi_n': roi.roi_index,
                 'roi_z': roi.z,
                 'centroid_pix': np.asarray(centroids[spine_n]),
@@ -318,6 +317,10 @@ def process_predictions(
                 config=config)
             batch_spines_dicts.append(spines_dicts)
             batch_dendrites_dicts.append(dendrites_dicts)
+
+        # Add an overall spine_index key to the list
+        for i, spine_dict in enumerate(batch_spines_dicts):
+            spine_dict['spine_index'] = i
 
         return batch_spines_dicts, batch_dendrites_dicts
 

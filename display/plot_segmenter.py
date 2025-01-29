@@ -44,6 +44,7 @@ def plot_spines_2d(
         spine_size: int,
         fontsize: int,
         spine_color: str,
+        spine_edgecolor: str,
         ax: plt.Axes,
         scan_angle: bool,
 ) -> None:
@@ -98,7 +99,8 @@ def plot_spines_2d(
         all_centroids[:, 0],  # xs of all centroids in the field-of-view
         all_centroids[:, 1],  # ys of all centroids in the field-of-view
         s=spine_size,
-        color=spine_color)
+        color=spine_color,
+        edgecolors=spine_edgecolor)
 
     plt.show()
 
@@ -338,16 +340,19 @@ def plot_events_spines(
         events: list,
         n_event_threshold: int,
         spine_size: int,
+        spine_edgecolor: int,
         fontsize: int,
         ax: plt.Axes,
         show_cmap: bool,
+        cbar_width: float,
         cmap: str,
         scan_angle: bool,
+        zorder: int
 ) -> None:
 
     if not isinstance(spines, list):
         raise TypeError("spines must be a list of dictionaries.")
-    
+
     if n_event_threshold > len(events[0]):
         raise ValueError(
             f"n_event_threshold should be <= {len(events[0])}")
@@ -386,9 +391,11 @@ def plot_events_spines(
         [c[1] for c in nonzero_centroids],  # Y coordinates of selected spines
         s=spine_size,
         c=nonzero_event_counts,
+        edgecolors=spine_edgecolor,
         cmap=cmap,
         vmin=1,  # Minimum value for the color scale (at least 1 event)
-        vmax=5   # Maximum value for the color scale (up to 5 events)
+        vmax=5,  # Maximum value for the color scale (up to 5 events)
+        zorder=zorder
     )
 
     if show_cmap:
@@ -396,13 +403,11 @@ def plot_events_spines(
             scatter,
             ax=ax,
             label='Number of Events',
-            shrink=0.8)
+            shrink=cbar_width)
 
         cbar.ax.tick_params(labelsize=fontsize)
         cbar.set_label('Number of Events', fontsize=fontsize)
         cbar.set_ticks([1, 2, 3, 4, 5])
-
-    plt.show()
 
 
 def spine_sholl(

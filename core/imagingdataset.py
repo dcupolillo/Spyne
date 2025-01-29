@@ -62,7 +62,6 @@ class ImagingDataset:
         """
 
         assert paths
-        self.paths = paths
 
         if not isinstance(paths, NeuronPath):
             raise TypeError("'paths' must be a neuronpath.path.NeuronPath")

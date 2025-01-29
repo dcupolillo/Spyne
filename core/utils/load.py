@@ -61,10 +61,20 @@ def load_metadata_from_tiff(
             roigroup_data = (
                 scanimage_metadata['RoiGroups']['imagingRoiGroup'])
             rois = roigroup_data['rois']
+            
+            rois_list = []
+            if isinstance(rois, dict):
+                rois_list.append(rois)
+            elif isinstance(rois, list):
+                rois_list = rois
+            else:
+                raise TypeError(f"Unexpected type for rois: {type(rois)}")
 
-            rois = [rois] if isinstance(rois, dict) else rois
+            for n_roi_in_z, roi in enumerate(rois_list):
 
-            for n_roi_in_z, roi in enumerate(rois):
+                # sanity check for single roi extracted metadata
+                if not isinstance(roi, dict):
+                    raise TypeError("Error in metadata type.")
 
                 z = float(roi['name'].split(",")[0].split(" = ")[-1])
 
@@ -90,10 +100,15 @@ def load_metadata_from_tiff(
                     coplanar_dict[z] = []
                 coplanar_dict[z].append(n_roi_overall)
 
-                branch_degree = (
-                    dataset_instance.sf.neuComp[file_n][n_roi_in_z].branch_degree)
-                branch_id = (
-                    dataset_instance.sf.neuComp[file_n][n_roi_in_z].branch_id)
+                try:
+                    branch_degree = (
+                        dataset_instance.sf.neuComp[
+                            file_n][n_roi_in_z].branch_degree)
+                    branch_id = (
+                        dataset_instance.sf.neuComp[
+                            file_n][n_roi_in_z].branch_id)
+                except: 
+                    pass
 
                 metadata.append({
                     'objective resolution':
