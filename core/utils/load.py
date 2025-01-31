@@ -75,9 +75,23 @@ def load_metadata_from_tiff(
                 # sanity check for single roi extracted metadata
                 if not isinstance(roi, dict):
                     raise TypeError("Error in metadata type.")
+                
+                # Call the corresponding ROIpy.Scanfields.Roi object
+                # BUG: there is sometimes uncorrespondence between
+                # the metadata saved during data acquisition
+                # and generated ROIs in ROIpy. Probably due to ROIpy 
+                # updating following data collection (.roi files generated
+                # at a previous time).
+                try:
+                    roi_in_scanfield_object = (
+                        dataset_instance.sf.neuComp[file_n][n_roi_in_z])
+                except:
+                    print(file_n, file_path)
+                    break
 
                 z = float(roi['name'].split(",")[0].split(" = ")[-1])
 
+                # Further access nested metadata
                 scanfield = roi['scanfields']
                 center_xy = scanfield['centerXY']
                 size_xy = scanfield['sizeXY']
@@ -100,16 +114,17 @@ def load_metadata_from_tiff(
                     coplanar_dict[z] = []
                 coplanar_dict[z].append(n_roi_overall)
 
-                try:
-                    branch_degree = (
-                        dataset_instance.sf.neuComp[
-                            file_n][n_roi_in_z].branch_degree)
-                    branch_id = (
-                        dataset_instance.sf.neuComp[
-                            file_n][n_roi_in_z].branch_id)
-                except: 
-                    pass
-
+                # Take ROIpy.Scanfields.Roi specific metadata
+                branch_degree = roi_in_scanfield_object.branch_degree
+                branch_id = roi_in_scanfield_object.branch_id
+                
+                # NOTE: I'd rather take this info from ROIpy.Scanfields
+                # objects for correspondence reasons, as after data
+                # acquisition, ScanImage applies new UUIDs to ROIs
+                roi_uuid = roi_in_scanfield_object.roi_uuid
+                roi_uuid_uint64 = roi_in_scanfield_object.roi_uuid_uint64
+                
+                # Write the metadata entry
                 metadata.append({
                     'objective resolution':
                         frame_data["SI.objectiveResolution"],
@@ -120,8 +135,8 @@ def load_metadata_from_tiff(
                     'pixel_resolution_xy': pixel_resolution_xy,
                     'pixel_to_ref_transform':
                         scanfield['pixelToRefTransform'],
-                    'roi_uuid': scanfield['roiUuid'],
-                    'roi_uuid_int64': scanfield['roiUuiduint64'],
+                    'roi_uuid': roi_uuid,
+                    'roi_uuid_int64': roi_uuid_uint64,
                     'rotation_degrees': scanfield['rotationDegrees'],
                     'size_xy': scanfield['sizeXY'],
                     'resolution': resolution,

@@ -56,7 +56,8 @@ class ImagingDataset:
         Raises
         ------
         TypeError
-            If `paths` is not a NeuronPath object or `kernel_size` is not a tuple.
+            If `paths` is not a NeuronPath object or `kernel_size`
+            is not a tuple.
         Exception
             If the imaging path is invalid, non-existent, or empty.
         """

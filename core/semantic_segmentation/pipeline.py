@@ -169,7 +169,11 @@ def semantic_segmentation_pipeline(
     spines_data = list(chain.from_iterable(spines_data))
     dendrites_data = list(chain.from_iterable(dendrites_data))
 
-    # Optionally save precomputed data
+    # Add an overall spine_index key to the list
+    for i, spine_dict in enumerate(spines_data):
+        spine_dict['spine_index'] = i
+
+    # Save data
     fl.save(Path(output_folder, "spines_data.h5"), spines_data)
 
     return segmenters, spines_data, dendrites_data

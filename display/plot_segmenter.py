@@ -347,7 +347,8 @@ def plot_events_spines(
         cbar_width: float,
         cmap: str,
         scan_angle: bool,
-        zorder: int
+        zorder: int,
+        **scatter_kwargs,
 ) -> None:
 
     if not isinstance(spines, list):
@@ -395,7 +396,8 @@ def plot_events_spines(
         cmap=cmap,
         vmin=1,  # Minimum value for the color scale (at least 1 event)
         vmax=5,  # Maximum value for the color scale (up to 5 events)
-        zorder=zorder
+        zorder=zorder,
+         **scatter_kwargs
     )
 
     if show_cmap:
@@ -444,7 +446,8 @@ def spine_sholl(
 
         # Filter out spines with 0 events
         nonzero_centroids = [
-            centroid for centroid, count in zip(all_centroids, event_counts)
+            centroid for centroid, count in zip(
+                all_centroids, event_counts)
             if count > n_event_threshold]
 
         nonzero_event_counts = [

@@ -170,19 +170,18 @@ def process_prediction(
     for spine_n, spine in enumerate(spine_single_labels):
         if spine is not None:
             spines_dicts[spine_n] = {
-                'roi_n': roi.roi_index,
-                'roi_z': roi.z,
+                'roi_n': roi.roi_metadata['n_roi'],
+                'roi_z': roi.roi_metadata['z'],
                 'centroid_pix': np.asarray(centroids[spine_n]),
                 'mask': spine,
-                'branch_id': roi.branch_id,
-                'branch_degree': roi.branch_degree,
+                'branch_id': roi.roi_metadata['branch_id'],
+                'branch_degree': roi.roi_metadata['branch_degree'],
                 'spine_area_pix': np.sum(spine),
                 'spine_area_um': (
                     np.sum(spine) *
                     roi.roi_metadata['resolution'][0] *
                     roi.roi_metadata['resolution'][1]
                 )
-
             }
 
     # Extract individual dendrites
@@ -191,6 +190,7 @@ def process_prediction(
         if np.any(binary_mask):
             dendrite_single_labels[n-1] = binary_mask
 
+    # FIXME: improve dendritic definition
     # Populate the dendrites dictionary
     for dendrite_n, dendrite in enumerate(dendrite_single_labels):
         if dendrite is not None:
@@ -264,7 +264,8 @@ def process_predictions(
     Parameters
     ----------
     segmenters : np.ndarray
-        Array or list of ROI segmenters, each representing an individual ROI.
+        Array or list of ROI segmenters, each representing an
+        individual ROI.
     spine_predictions : np.ndarray
         Neural network predictions for spines.
         Can be a single prediction or a batch of predictions.
@@ -272,7 +273,8 @@ def process_predictions(
         Neural network predictions for dendrites.
         Can be a single prediction or a batch of predictions.
     config : dict
-        Dictionary containing all configuration parameters required for processing:
+        Dictionary containing all configuration parameters required
+        for processing:
         - spine_threshold : float
             Threshold value for binarizing spine predictions.
         - dendrite_threshold : float
@@ -293,12 +295,13 @@ def process_predictions(
     Returns
     -------
     tuple
-        - List of dictionaries for spines and dendrites for single or batch ROIs.
+        - List of dictionaries for spines and dendrites for single
+        or batch ROIs.
 
     Notes
     -----
-    - When `spine_predictions` and `dendrite_predictions` are lists, the function
-      processes them as a batch.
+    - When `spine_predictions` and `dendrite_predictions` are lists,
+    the function processes them as a batch.
     - For single predictions, it directly calls `process_single_prediction`.
     """
 
@@ -317,10 +320,6 @@ def process_predictions(
                 config=config)
             batch_spines_dicts.append(spines_dicts)
             batch_dendrites_dicts.append(dendrites_dicts)
-
-        # Add an overall spine_index key to the list
-        for i, spine_dict in enumerate(batch_spines_dicts):
-            spine_dict['spine_index'] = i
 
         return batch_spines_dicts, batch_dendrites_dicts
 

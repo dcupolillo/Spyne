@@ -418,6 +418,9 @@ class DatasetSegmenter:
             Sublist of self.spines_data.
         """
 
+        if branch_id not in np.arange(self.dataset.sf.n_branches):
+            raise IndexError("Branch id out of range.")
+
         return [
             spine for spine in self.spines_data
             if spine['branch_id'] == branch_id]
@@ -741,17 +744,19 @@ class DatasetSegmenter:
         morphology : object
             Morphology object containing spatial data for spines and dendrites.
         radius_step : float
-            Distance between consecutive concentric spheres in the Sholl analysis.
+            Distance between consecutive concentric spheres in the
+            Sholl analysis.
         n_radii : int
             Number of radii (spheres) to generate for the analysis.
         input_type : str, optional
             Specify the data type ('BLA' or 'CA3') for event-based analysis.
             If None, all spines are considered. Default is None.
         n_event_threshold : int, optional
-            Minimum number of events required for a spine to be included in the analysis.
-            Default is 0.
+            Minimum number of events required for a spine to be
+            included in the analysis. Default is 0.
         ax : plt.Axes, optional
-            Matplotlib Axes object for plotting the Sholl analysis in 2D space. Default is None.
+            Matplotlib Axes object for plotting the Sholl
+            analysis in 2D space. Default is None.
         ax_sholl_curve : plt.Axes, optional
             Matplotlib Axes object for plotting the Sholl intersection curve. Default is None.
         circle_color : str, optional
