@@ -2,13 +2,16 @@
     @author: dcupolillo """
 
 import spyne
-from neuronpath.path import neuronpath
+from pathlib import Path
 
-# Choose the structure to be analyzed
-paths = neuronpath('240813', 1)
+date = "250527"
+cell_n = "cell0003"
+data_folder = Path("data")
+imaging_folder = data_folder / date / cell_n / "neuron"
 
 # Initialize the dataset and segmenter to identify spines
-dataset = spyne.ImagingDataset(paths)
+dataset = spyne.ImagingDataset(imaging_folder)
+ephy = spyne.EphyDataset(dataset)
 segmenter = spyne.DatasetSegmenter(dataset)
 
 # Index individual sweep of selected ROI of slected Scanfield
@@ -40,32 +43,35 @@ segmented_roi.plot_zscore()
 # Index individual spines
 spine = segmented_roi[0]
 
-# To launch a batch analysis
+# To launch an analysis on a complete neuron dataset
 segmenter.collect_all_data()
 
-# To launch multiple batch analyses
-neuronpaths_list = [
-    neuronpath('240828', 1),
-    neuronpath('240910', 1),
-    neuronpath('240912', 2),
-    neuronpath('240913', 1),
-]
-spyne.run_multiple_batches(neuronpaths_list)
+test_model_path = Path(
+    r"C:\Users\dcupolillo\Projects\spyne",
+    r"neuralnetwork\spine_segmentation\bayesian_search",
+    r"models\model_250414_trial18.h5")
 
-# Not at 16 hz
-not_16hx_list = [
-    neuronpath('240813', 1),
-    neuronpath('240814', 2),
-    neuronpath('240827', 2),
-]
-spyne.run_multiple_batches(not_16hx_list)
+segmenter = spyne.DatasetSegmenter(
+    dataset,
+    segmentation_model_fn=test_model_path)
 
-neuronpaths_list = [
-    neuronpath('240813', 1),
-    neuronpath('240814', 2),
-    neuronpath('240827', 2),
-    neuronpath('240828', 1),
-    neuronpath('240910', 1),
-    neuronpath('240912', 2),
-    neuronpath('240913', 1),
-]
+
+
+
+dates = [_dir.stem for _dir in data_folder.iterdir()]
+cell_ns = [d.stem for date in dates for d in (data_folder / date).iterdir()]
+
+dataset_list = [None] * len(dates)
+segmenter_list = [None] * len(dates)
+
+for n, (date, cell_n) in enumerate(zip(dates, cell_ns)):
+    # if dataset_list[n] is not None:
+    #     continue
+    # print(date)
+    imaging_folder = data_folder / date / cell_n / "neuron"
+    saving_folder = imaging_folder.parent / "time_series" / "3x3x3_median_filter"
+    dataset = spyne.ImagingDataset(imaging_folder, kernel_size=(3, 3, 3))
+    dataset_list[n] = dataset
+    segmenter = spyne.DatasetSegmenter(dataset)
+    segmenter.collect_all_data(save_path=saving_folder)
+    segmenter_list[n] = segmenter
