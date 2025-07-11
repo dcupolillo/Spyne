@@ -4,6 +4,7 @@
 .vscode
 .ipynb_checkpoints/
 .spyproject/
+__pycache__/
 *.tmp
 optimization_models/
 presentations/
