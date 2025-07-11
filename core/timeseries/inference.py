@@ -3,8 +3,10 @@ from tqdm import tqdm
 import flammkuchen as fl
 import torch
 import numpy as np
-from spyne.neuralnetwork.zscore_decoder.utils import set_device
-from spyne.core.zscore_classifier.classifier import load_classifier
+
+import zscore_classifier as zsc
+# from spyne.neuralnetwork.zscore_decoder.utils import set_device
+from spyne.core.timeseries.classifier import load_classifier
 
 
 def is_calcium_event(
@@ -18,7 +20,8 @@ def is_calcium_event(
     Parameters
     ----------
     sweep : np.ndarray
-        A 1D numpy array representing the calcium trace (e.g., a single sweep or time series).
+        A 1D numpy array representing the calcium trace
+        (e.g., a single sweep or time series).
     model : torch.nn.Module
         A trained PyTorch neural network model for calcium event detection.
     device : str
@@ -31,11 +34,14 @@ def is_calcium_event(
 
     Notes
     -----
-    - The model processes the input trace after it is reshaped to match the 
-      expected input dimensions for the neural network (batch size, channels, and sequence length).
-    - The model is set to evaluation mode (`model.eval()`) to ensure correct inference behavior.
+    - The model processes the input trace after it is reshaped
+        to match the expected input dimensions for the
+        neural network (batch size, channels, and sequence length).
+    - The model is set to evaluation mode (`model.eval()`)
+        to ensure correct inference behavior.
     - The function returns a single probability score as output.
-    - Ensure the input `sweep` is normalized or preprocessed to match the model's training conditions.
+    - Ensure the input `sweep` is normalized or preprocessed
+        to match the model's training conditions.
     """
 
     model.eval()
@@ -46,7 +52,6 @@ def is_calcium_event(
 
     with torch.no_grad():
         output = model(sweep)
-        # prediction = (output > 0.5).float().item()
 
     return output.item()
 
@@ -61,19 +66,24 @@ def detect_calcium_events(
     """
     Detect calcium events in spines using a trained neural network classifier.
 
-    This function takes a list of z-scored calcium traces from BLA and CA3 spines,
-    and performs inference using a pre-trained neural network classifier to detect
-    calcium events. The output is a list of probabilities for each sweep in each spine.
+    This function takes a list of z-scored calcium traces from
+    BLA and CA3 spines, and performs inference using a pre-trained
+    neural network classifier to detect calcium events.
+    The output is a list of probabilities for each sweep
+    in each spine.
 
     Parameters
     ----------
     config : dict
-        A dictionary containing the configuration parameters for the classifier model.
+        A dictionary containing the configuration parameters
+        for the classifier model.
     zscores_BLA : list
-        A nested list where each element corresponds to a spine, and each spine contains
+        A nested list where each element corresponds to a spine,
+        and each spine contains
         a list of z-scored calcium traces from BLA.
     zscores_CA3 : list
-        A nested list where each element corresponds to a spine, and each spine contains
+        A nested list where each element corresponds to a spine,
+        and each spine contains
         a list of z-scored calcium traces from CA3.
     save : bool, optional
         Whether to save the calcium event probabilities to disk.
@@ -83,9 +93,10 @@ def detect_calcium_events(
     Returns
     -------
     tuple
-        A tuple containing the calcium event probabilities for BLA and CA3 spines.
+        A tuple containing the calcium event probabilities for BLA
+        and CA3 spines.
     """
-    
+
     model_path = config['classifier_model_fn']
     output_folder = Path(output_folder)
 
@@ -93,7 +104,7 @@ def detect_calcium_events(
     calcium_events_CA3 = []
 
     model = load_classifier(model_path)
-    device = set_device()
+    device = zsc.set_device()
     model.to(device)
 
     # Process BLA

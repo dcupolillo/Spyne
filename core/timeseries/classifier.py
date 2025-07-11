@@ -1,5 +1,5 @@
 import torch
-from spyne.core.zscore_classifier.model import ZScoreClassifier
+import zscore_classifier as zsc
 
 
 def load_classifier(model_path: str) -> torch.nn.Module:
@@ -17,7 +17,7 @@ def load_classifier(model_path: str) -> torch.nn.Module:
         The loaded ZScoreNN model in evaluation mode.
     """
 
-    model = ZScoreClassifier()
+    model = zsc.ZScoreClassifier()
     model.load_state_dict(torch.load(model_path))
 
     return model

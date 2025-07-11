@@ -29,11 +29,11 @@ from spyne.core.semantic_segmentation.padding import pad_image
 from spyne.core.semantic_segmentation.inference import inference
 from spyne.core.semantic_segmentation.post_processing import (
     process_predictions)
-from spyne.core.zscore_classifier.timeseries_pipeline import collect_timeseries
-from spyne.core.zscore_classifier.inference import (
+from spyne.core.timeseries.timeseries_pipeline import collect_timeseries
+from spyne.core.timeseries.inference import (
     detect_calcium_events,
     binarize_calcium_events_array)
-from spyne.core.zscore_classifier.calculate_timeseries import (
+from spyne.core.timeseries.calculate_timeseries import (
     dFF,
     get_time_series,
     z_score)

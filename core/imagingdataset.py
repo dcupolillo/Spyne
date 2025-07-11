@@ -31,8 +31,7 @@ class ImagingDataset:
     Example
     -------
     >>> import spyne
-    >>> from neuronpath.path import neuronpath
-    >>> paths = neuronpath('YYMMDD', cell_number)
+    >>> paths = "path/to/your/folder"
     >>> dataset = spyne.ImagingDataset(paths)
     >>> print(f"Number of ROIs: {len(dataset)}")
     """
@@ -279,7 +278,8 @@ class Roi:
         adc = self.adc_list[sweep_index]
 
         # FIXME: This is a temporary solution to differentiate between
-        # the two types of stimulation. A more robust solution should be implemented.
+        # the two types of stimulation.
+        # A more robust solution should be implemented.
 
         if adc == 'IN 3':  # IN3 corresponds to the electrode digital output
             return SweepCA3(
