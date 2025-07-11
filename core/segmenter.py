@@ -240,7 +240,7 @@ class DatasetSegmenter:
 
         if existing_files:
             for attr, filename in tqdm(
-                    existing_files.items(),  # if not overwrite else files.items(),
+                    existing_files.items(),
                     desc="Loading spines data",
                     total=len(existing_files)):
 
@@ -378,6 +378,7 @@ class DatasetSegmenter:
         self.calcium_events_BLA = calcium_events_BLA
         self.calcium_events_CA3 = calcium_events_CA3
 
+        # TODO improve classification threshold
         # (
         #     self.dynamic_threshold_BLA,
         #     self.calcium_events_binary_BLA,
@@ -401,14 +402,84 @@ class DatasetSegmenter:
 
         return calcium_events_BLA, calcium_events_CA3
 
-    def __len__(self):
-        return len(self._dataset)
+    @cache
+    def _get_roi(self, roi_index: int) -> object:
+        """
+        Retrieve a specific ROI's segmentation and associated data.
+
+        Parameters
+        ----------
+        roi_index : int
+            Index of the ROI to retrieve.
+
+        Returns
+        -------
+        RoiSegmenter
+            An instance containing individual ROI data, metadata, and
+            segmentation.
+
+        Raises
+        ------
+        IndexError
+            If the specified `roi_index` is out of bounds.
+        """
+
+        roi_metadata = self.metadata[roi_index]
+
+        spine_indices = [
+            n for n, i in enumerate(self.spines_data)
+            if i['roi_n'] == roi_index]
+
+        selected_dFF_CA3 = self._fetch_spine_data(
+            self.dFF_CA3, spine_indices)
+        selected_zscore_CA3 = self._fetch_spine_data(
+            self.zscores_CA3, spine_indices)
+        selected_ts_CA3 = self._fetch_spine_data(
+            self.ts_CA3, spine_indices)
+        selected_dFF_BLA = self._fetch_spine_data(
+            self.dFF_BLA, spine_indices)
+        selected_zscore_BLA = self._fetch_spine_data(
+            self.zscores_BLA, spine_indices)
+        selected_ts_BLA = self._fetch_spine_data(
+            self.ts_BLA, spine_indices)
+        selected_calcium_events_BLA = [
+            prob for n, spine in enumerate(self.calcium_events_BLA)
+            for prob in spine if n in spine_indices]
+        selected_calcium_events_CA3 = [
+            prob for n, spine in enumerate(self.calcium_events_CA3)
+            for prob in spine if n in spine_indices]
+        selected_calcium_events_binary_BLA = [
+            prob for n, spine in enumerate(self.calcium_events_binary_BLA)
+            for prob in spine if n in spine_indices]
+        selected_calcium_events_binary_CA3 = [
+            prob for n, spine in enumerate(self.calcium_events_binary_CA3)
+            for prob in spine if n in spine_indices]
+
+        selected_spines_data = [
+            self.spines_data[i] for i in spine_indices]
+
+        return RoiSegmenter(
+            roi_index,
+            roi_metadata,
+            self._dataset[roi_index],
+            self.params,
+            selected_dFF_CA3,
+            selected_zscore_CA3,
+            selected_ts_CA3,
+            selected_dFF_BLA,
+            selected_zscore_BLA,
+            selected_ts_BLA,
+            selected_spines_data,
+            selected_calcium_events_BLA,
+            selected_calcium_events_CA3,
+            selected_calcium_events_binary_BLA,
+            selected_calcium_events_binary_CA3)
 
     def __getitem__(self, roi_index: int) -> None:
         if roi_index not in self._dataset.roi_list:
             raise IndexError(
                 f'Roi {roi_index} out of range {len(self._dataset.roi_list)}')
-        return self.get_roi(roi_index)
+        return self._get_roi(roi_index)
 
     def __getattr__(self, name: str):
         return self.__dict__[f"_{name}"]
@@ -427,6 +498,9 @@ class DatasetSegmenter:
             return roi_segmenter
         else:
             raise StopIteration
+
+    def __len__(self):
+        return len(self._dataset)
 
     def spines_by_branch(
             self,
@@ -533,7 +607,7 @@ class DatasetSegmenter:
             spine for spine, event in zip(self.spines_data, events)
             if sum(event) >= n_event_threshold]
 
-    def fetch_spine_data(
+    def _fetch_spine_data(
             self,
             data_batch: list or np.ndarray,
             spine_indices: list
@@ -557,78 +631,7 @@ class DatasetSegmenter:
 
         return np.array(data_batch)[spine_indices] if data_batch else []
 
-    @cache
-    def get_roi(self, roi_index: int) -> object:
-        """
-        Retrieve a specific ROI's segmentation and associated data.
 
-        Parameters
-        ----------
-        roi_index : int
-            Index of the ROI to retrieve.
-
-        Returns
-        -------
-        RoiSegmenter
-            An instance containing individual ROI data, metadata, and
-            segmentation.
-
-        Raises
-        ------
-        IndexError
-            If the specified `roi_index` is out of bounds.
-        """
-
-        roi_metadata = self.metadata[roi_index]
-
-        spine_indices = [
-            n for n, i in enumerate(self.spines_data)
-            if i['roi_n'] == roi_index]
-
-        selected_dFF_CA3 = self.fetch_spine_data(
-            self.dFF_CA3, spine_indices)
-        selected_zscore_CA3 = self.fetch_spine_data(
-            self.zscores_CA3, spine_indices)
-        selected_ts_CA3 = self.fetch_spine_data(
-            self.ts_CA3, spine_indices)
-        selected_dFF_BLA = self.fetch_spine_data(
-            self.dFF_BLA, spine_indices)
-        selected_zscore_BLA = self.fetch_spine_data(
-            self.zscores_BLA, spine_indices)
-        selected_ts_BLA = self.fetch_spine_data(
-            self.ts_BLA, spine_indices)
-        selected_calcium_events_BLA = [
-            prob for n, spine in enumerate(self.calcium_events_BLA)
-            for prob in spine if n in spine_indices]
-        selected_calcium_events_CA3 = [
-            prob for n, spine in enumerate(self.calcium_events_CA3)
-            for prob in spine if n in spine_indices]
-        selected_calcium_events_binary_BLA = [
-            prob for n, spine in enumerate(self.calcium_events_binary_BLA)
-            for prob in spine if n in spine_indices]
-        selected_calcium_events_binary_CA3 = [
-            prob for n, spine in enumerate(self.calcium_events_binary_CA3)
-            for prob in spine if n in spine_indices]
-
-        selected_spines_data = [
-            self.spines_data[i] for i in spine_indices]
-
-        return RoiSegmenter(
-            roi_index,
-            roi_metadata,
-            self._dataset[roi_index],
-            self.params,
-            selected_dFF_CA3,
-            selected_zscore_CA3,
-            selected_ts_CA3,
-            selected_dFF_BLA,
-            selected_zscore_BLA,
-            selected_ts_BLA,
-            selected_spines_data,
-            selected_calcium_events_BLA,
-            selected_calcium_events_CA3,
-            selected_calcium_events_binary_BLA,
-            selected_calcium_events_binary_CA3)
 
     def plot_spines(
             self,
@@ -1159,7 +1162,7 @@ class DatasetSegmenter:
         spines : list, optional
             List of spines to plot. Default is None, plotting all spines.
         ax : plt.Axes, optional
-            Matplotlib Axes object to plot on. If None, a new figure is created.
+            Axes object to plot on. If None, a new figureis created.
         figsize : tuple, optional
             Size of the figure. Default is (10, 6).
         input_type : str, optional
@@ -1584,32 +1587,8 @@ class RoiSegmenter:
             zscore_cmap=zscore_cmap,
             fontsize=fontsize)
 
-    def __len__(self):
-        if self.spines_data is None:
-            raise KeyError("Run inference() first.")
-        return len(self.spines_data)
-
-    def __getitem__(self, spine_index) -> None:
-        if self.spines_data is None:
-            raise KeyError("Run inference() first.")
-        return self.get_spine(spine_index)
-
-    def __iter__(self):
-        if self.spines_data is None:
-            raise KeyError("Run inference() first.")
-        self._current_spine_index = 0
-        return self
-
-    def __next__(self):
-        if self._current_spine_index < len(self.spines_data):
-            spine = self[self._current_spine_index]
-            self._current_spine_index += 1
-            return spine
-        else:
-            raise StopIteration
-
     @cache
-    def get_spine(self, spine_index: int) -> object:
+    def _get_spine(self, spine_index: int) -> object:
         """
         Retrieve a specific spine's data.
 
@@ -1659,6 +1638,30 @@ class RoiSegmenter:
             selected_dFF_BLA,
             selected_zscore_BLA,
             selected_ts_BLA,)
+
+    def __getitem__(self, spine_index) -> None:
+        if self.spines_data is None:
+            raise KeyError("Run inference() first.")
+        return self._get_spine(spine_index)
+
+    def __iter__(self):
+        if self.spines_data is None:
+            raise KeyError("Run inference() first.")
+        self._current_spine_index = 0
+        return self
+
+    def __next__(self):
+        if self._current_spine_index < len(self.spines_data):
+            spine = self[self._current_spine_index]
+            self._current_spine_index += 1
+            return spine
+        else:
+            raise StopIteration
+
+    def __len__(self):
+        if self.spines_data is None:
+            raise KeyError("Run inference() first.")
+        return len(self.spines_data)
 
 
 class Spine:
