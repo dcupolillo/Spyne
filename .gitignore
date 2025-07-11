@@ -1,0 +1,12 @@
+# cache files
+*.pyc
+*.pyo
+.vscode
+*.tmp
+optimization_models/
+presentations/
+models/
+analysis/
+neuralnetwork/spine_segmentation/bayesian_search
+neuralnetwork/IoU
+data/
