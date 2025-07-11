@@ -53,14 +53,13 @@ class DatasetSegmenter:
     Example
     -------
     >>> import spyne
-    >>> from neuronpath.path import neuronpath
-    >>> paths = neuronpath('YYMMDD', cell_number)
+    >>> paths = "path/to/your/folder"
     >>> dataset = spyne.ImagingDataset(paths)
     >>> segmenter = spyne.DatasetSegmenter(dataset)
 
     >>> # Run segmentation and analyze the dataset
     >>> segmenter.collect_all_data()
-    >>> segmenter.detect_calcium_events()
+    >>> segmenter.calcium_events_predictions()
 
     >>> # Visualize detected spines
     >>> segmenter.plot_all_spines()
@@ -269,7 +268,8 @@ class DatasetSegmenter:
     ) -> None:
         """
         Collect and process spine and dendrite segmentation
-        data for the entire dataset.
+        data and collects within-spine time series
+        for the entire dataset.
 
         This method performs the following steps:
         1. Runs the semantic segmentation pipeline for all ROIs,
@@ -278,8 +278,6 @@ class DatasetSegmenter:
         segmenters for indexing.
         3. Collects timeseries data (z-scores, dF/F, timestamps)
         for all segmented spines.
-        4. Classifies calcium events based on collected z-scores.
-        5. Provides a binary array of activated spines.
 
         Parameters
         ----------
@@ -304,25 +302,13 @@ class DatasetSegmenter:
             dF/F0 values for BLA spines.
         ts_BLA : np.ndarray
             Timestamps for BLA spines.
-        calcium_events_BLA : list
-            Calcium event probabilities for BLA spines.
-        calcium_events_CA3 : list
-            Calcium event probabilities for CA3 spines.
-        calcium_events_binary_BLA : list
-            Binarized calcium event probabilities for BLA spines.
-        calcium_events_binary_CA3 : list
-            Binarized calcium event probabilities for CA3 spines.
-        dynamic_threshold_BLA : float
-            Probability utoff to classify an event for BLA spines.
-        dynamic_threshold_CA3 : float
-            Probability utoff to classify an event for CA3 spines.
 
         Notes
         -----
         - Spine and dendrite segmentation is performed using a deep learning
-        model configured in `self.params`.
+            model configured in `self.params`.
         - Timeseries data collection extracts relevant information
-        (e.g., z-scores, dF/F) for all spines detected during segmentation.
+            (e.g., z-scores, dF/F) for all spines detected during segmentation.
         """
 
         saving_folder = (

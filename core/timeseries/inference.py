@@ -3,10 +3,28 @@ from tqdm import tqdm
 import flammkuchen as fl
 import torch
 import numpy as np
-
 import zscore_classifier as zsc
-# from spyne.neuralnetwork.zscore_decoder.utils import set_device
-from spyne.core.timeseries.classifier import load_classifier
+
+
+def load_classifier(model_path: str) -> torch.nn.Module:
+    """
+    Load a pre-trained Z-Score neural network classifier.
+
+    Parameters
+    ----------
+    model_path : str
+        Path to the saved PyTorch model file (.pth).
+
+    Returns
+    -------
+    torch.nn.Module
+        The loaded ZScoreNN model in evaluation mode.
+    """
+
+    model = zsc.ZScoreClassifier()
+    model.load_state_dict(torch.load(model_path))
+
+    return model
 
 
 def is_calcium_event(
@@ -155,22 +173,23 @@ def binarize_calcium_events_array(
     Binarize calcium event probabilities for BLA and CA3 events based on
     a percentile-based dynamic threshold of the distribution of probabilities.
 
-    This function takes a list of calcium event probabilities, computes a 
-    dynamic threshold based on a specified percentile, and binarizes the 
-    events such that probabilities above the threshold are set to 1, 
-    otherwise 0.
+    This function takes a list of calcium event probabilities,
+    computes a dynamic threshold based on a specified percentile,
+    and binarizes the events such that probabilities above the
+    threshold are set to 1, otherwise 0.
 
     Parameters
     ----------
     calcium_events_BLA : list
-        A nested list where each element corresponds to a spine, and each 
-        spine contains a list of probabilities of having a BLA event.
+        A nested list where each element corresponds to a spine,
+        and each spine contains a list of probabilities of
+        having a BLA event.
     calcium_events_CA3 : list
         A nested list where each element corresponds to a spine, and each
         spine contains a list of probabilities of having a CA3 event.
     percentile : int
-        The percentile value used to compute the dynamic threshold. For example, 
-        a value of 99 will compute the 99th percentile.
+        The percentile value used to compute the dynamic threshold.
+        For example, a value of 99 will compute the 99th percentile.
     save : bool, optional
         Whether to save the binarized calcium events to disk.
     output_folder : str or Path
@@ -180,18 +199,19 @@ def binarize_calcium_events_array(
     -------
     tuple
         A tuple containing:
-        - `dynamic_threshold` (float): The computed threshold value based on 
-          the given percentile.
-        - `binary_calcium_events` (list): A nested list with the same structure 
-          as `calcium_events`, where probabilities above the threshold are set 
-          to 1 and the rest to 0.
+        - `dynamic_threshold` (float): The computed threshold value
+            based on the given percentile.
+        - `binary_calcium_events` (list): A nested list with the
+            same structure as `calcium_events`, where probabilities
+            above the threshold are set to 1 and the rest to 0.
 
     Notes
     -----
-    - NaN values in the `calcium_events` input are excluded when calculating 
-      the percentile-based threshold.
-    - The output retains the structure of the input list, making it easy to 
-      trace binarized values back to their respective spines and sweeps.
+    - NaN values in the `calcium_events` input are excluded when
+        calculating the percentile-based threshold.
+    - The output retains the structure of the input list,
+        making it easy to trace binarized values back to
+        their respective spines and sweeps.
     """
 
     probabilities_BLA = np.array(
@@ -207,7 +227,7 @@ def binarize_calcium_events_array(
 
     calcium_events_binary_BLA = np.zeros_like(
         calcium_events_BLA, dtype=int)
-    
+
     calcium_events_binary_CA3 = np.zeros_like(
         calcium_events_CA3, dtype=int)
 
