@@ -2,6 +2,8 @@
 *.pyc
 *.pyo
 .vscode
+.ipynb_checkpoints/
+.spyproject/
 *.tmp
 optimization_models/
 presentations/
