@@ -49,18 +49,20 @@ Dataset
 
 `spyne` depends and relies on structural data generated using `ROIpy` (find repository [here](https://github.com/dcupolillo/ROIpy)).
 
-### Neuronpath
-
-`spyne` objects initialization depends on the custom dataset files handler `neuronpath` (find repository [here](https://github.com/dcupolillo/neuronpath)).
-
 **Example Usage:**
 
 ```python
-from neuronpath.path import neuronpath
-paths = neuronpath("date_string", cell_number)
+import spyne
+from pathlib import Path
 
-# date_string: str (in the format YYMMDD i.e. "240505")
-# cell_number: int (i.e. 1)
+date = "250101"  # YYMMDD format
+cell_n = "cell0001"  #cell000n format 
+data_folder = Path("data")  # where your data is stored
+imaging_folder = data_folder / date / cell_n / "neuron"
+
+# Initialize the dataset and segmenter to identify spines
+dataset = spyne.ImagingDataset(imaging_folder)
+segmenter = spyne.DatasetSegmenter(dataset)
 ```
 
 
