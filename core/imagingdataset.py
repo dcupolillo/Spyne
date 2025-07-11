@@ -10,8 +10,8 @@ import ROIpy as rp
 from spyne.display.plot_frames import (
     animate_frames, save_frames, save_single_frame)
 from spyne.core.utils.filters import median, gaussian
-from spyne.core.utils.load import load_metadata_from_tiff, load_imaging_data_from_tiff
-from neuronpath.path import NeuronPath
+from spyne.core.utils.load import (
+    load_metadata_from_tiff, load_imaging_data_from_tiff)
 
 
 class ImagingDataset:
@@ -39,7 +39,7 @@ class ImagingDataset:
 
     def __init__(
             self,
-            paths: NeuronPath,
+            folder: str or Path,
             kernel_size: tuple = (3, 3, 3)
     ) -> None:
         """
@@ -62,32 +62,46 @@ class ImagingDataset:
             If the imaging path is invalid, non-existent, or empty.
         """
 
-        assert paths
+        if not folder.is_dir():
+            raise Exception(f"{folder} must be a path to a FOLDER.")
 
-        if not isinstance(paths, NeuronPath):
-            raise TypeError("'paths' must be a neuronpath.path.NeuronPath")
+        if not folder.exists():
+            raise Exception(f"{folder} does not exist.")
 
-        if not paths.imaging.is_dir():
-            raise Exception(f"{paths.imaging} must be a path to a FOLDER.")
-
-        if not paths.imaging.exists():
-            raise Exception(f"{paths.imaging} does not exist")
-
-        if not any(paths.imaging.iterdir()):
-            raise Exception(f"{paths.imaging} is empty")
+        if not any(folder.iterdir()):
+            raise Exception(f"{folder} is empty.")
 
         if not isinstance(kernel_size, tuple):
-            raise TypeError("'kernel_size' must be a tuple")
+            raise TypeError("'kernel_size' must be a tuple.")
 
-        self.paths = paths
-        self.folder = paths.imaging
-        self.parent_folder = paths.parent
-        self.file_list = paths.tif_file_list
-        self.abf_file_list = paths.abf_file_list
+        if not len(kernel_size) == 3:
+            raise Exception("kernel_size must be of size 3.")
+
+        self.folder = folder
+        self.parent_folder = folder.parent
+
+        self.file_list = [
+            file_path for file_path in folder.rglob('*')
+            if file_path.suffix.lower() in ('.tif', '.tiff')]
+
+        self.abf_file_list = [
+            file_path for file_path in folder.rglob('*')
+            if file_path.suffix.lower() == ".abf"]
 
         self.median_filter_kernel_size = kernel_size
 
-        self.sf = rp.Scanfields(paths)
+        stack_file = next(
+            (f for f in folder.parent.glob('**/*')
+             if f.suffix.lower() in ('.tif', '.tiff')
+             and 'stack' in f.stem.lower()),
+            None)
+
+        stack = rp.Stack(stack_file)
+
+        swc_file = next(folder.parent.glob('*.swc'), None)
+
+        self._morph = rp.Morphology(swc_file, stack)
+        self._sf = rp.Scanfields(self._morph)
 
         self.metadata = self._load_metadata()
         self.data = self._load_data()
@@ -118,8 +132,8 @@ class ImagingDataset:
         Uses load_imaging_data_from_tiff() function
         to load the raw .tiff data and perform some
         initial processing, including:
-        - gating-PMT artifact correction 
-        - 3D median filter 
+        - gating-PMT artifact correction
+        - 3D median filter
 
         Returns
         -------
@@ -349,9 +363,11 @@ class Sweep:
         Parameters
         ----------
         timestamps : bool, optional
-            If True, displays the elapsed time on the frames. Default is False.
-        norm : list | tuple | np.ndarray, optional
-            Normalization range for the frame intensity values. Default is None.
+            If True, displays the elapsed time on the frames.
+            Default is False.
+        norm : list or tuple or np.ndarray, optional
+            Normalization range for the frame intensity values.
+            Default is None.
 
         Returns
         -------
@@ -378,11 +394,13 @@ class Sweep:
         Parameters
         ----------
         output_file : str | Path, optional
-            Path to save the video file. If None, saves with the sweep's filename.
+            Path to save the video file.
+            If None, saves with the sweep's filename.
         timestamps : bool, optional
             If True, includes timestamps in the video.
         norm : list | tuple | np.ndarray, optional
-            Normalization range for the frame intensity values. Default is None.
+            Normalization range for the frame intensity values.
+            Default is None.
 
         Returns
         -------
@@ -467,9 +485,11 @@ class Channel:
     """
     Representation of a single imaging channel for a sweep.
 
-    The `Channel` class encapsulates the data and metadata for a specific channel 
-    in a single sweep. It provides methods for visualization, saving, and 
-    statistical analysis of the channel data, as well as access to individual frames.
+    The `Channel` class encapsulates the data and metadata for
+    a specific channel in a single sweep.
+    It provides methods for visualization, saving, and
+    statistical analysis of the channel data, as well as access
+    to individual frames.
     """
 
     def __init__(
@@ -488,7 +508,8 @@ class Channel:
         roi_metadata : dict
             Metadata dictionary containing ROI and acquisition parameters.
         channel_data : np.ndarray
-            Frame sequence for the channel, with shape (n_frames, height, width).
+            Frame sequence for the channel, with shape
+            (n_frames, height, width).
 
         Returns
         -------
@@ -620,7 +641,8 @@ class Channel:
         Returns
         -------
         Frame
-            A `Frame` object containing the standard deviation projection of the channel.
+            A `Frame` object containing the standard deviation projection
+            of the channel.
         """
 
         frame_data = np.std(self.channel, axis=0)
@@ -635,9 +657,10 @@ class Frame:
     """
     Representation of a single frame.
 
-    The `Frame` class encapsulates data and metadata for a single imaging frame 
-    within a specific ROI, channel, and sweep. It provides methods for 
-    visualization, saving, and applying basic image processing techniques.
+    The `Frame` class encapsulates data and metadata for a
+    single imaging frame within a specific ROI, channel, and sweep.
+    It provides methods for visualization, saving, and applying
+    basic image processing techniques.
     """
 
     def __init__(
@@ -654,7 +677,7 @@ class Frame:
         frame_index : int or str
             Index or identifier for the frame.
         roi_metadata : dict
-            Metadata dictionary containing information about the ROI, channel, 
+            Metadata dictionary containing information about the ROI, channel,
             and sweep.
         frame_data : np.ndarray
             The raw image data for the frame.

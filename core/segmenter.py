@@ -9,13 +9,17 @@ from tqdm import tqdm
 from functools import cache
 import matplotlib.pyplot as plt
 
+from spyne.core.imagingdataset import ImagingDataset
 from spyne.display.events import (
     plot_spine_pixel_annotation,
     plot_spine_calcium_traces,
     plot_spine_zscores,
     plot_single_spine_dFF)
 from spyne.display.plot_segmenter import (
+    rotate_and_transform_spines,
     plot_spines_2d,
+    animate_spines_3d,
+    animate_event_spines_3d,
     plot_events_spines,
     plot_zscore_heatmap,
     spine_sholl)
@@ -69,7 +73,8 @@ class DatasetSegmenter:
             dataset: object,
             segmentation_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
-                r"models/model_240909_2.h5"),
+                r"neuralnetwork/spine_segmentation/bayesian_search/"
+                r"models/model_250414_trial18.h5"),
             spine_threshold: float = 0.3,
             dendrite_threshold: float = 0.7,
             mask_size: int = 3,
@@ -81,7 +86,7 @@ class DatasetSegmenter:
             classifier_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
                 r"neuralnetwork/zscore_decoder/models/"
-                r"250123_zscoreclassifier_model.pth"),
+                r"250529_imbalanced_dataset_trial_17_model.pth"),
             classifier_cutoff: int = 99,
     ) -> None:
         """
@@ -131,38 +136,48 @@ class DatasetSegmenter:
         None
         """
 
-        if type(dataset).__name__ != 'ImagingDataset':
+        if not isinstance(dataset, ImagingDataset):
             raise TypeError('Invalid input type for dataset')
 
         if not Path(segmentation_model_fn).exists():
             raise FileNotFoundError(f'{segmentation_model_fn} does not exist')
 
-        self.dataset = dataset
-        self.metadata = self.dataset.metadata
+        self._dataset = dataset
+        self.metadata = self._dataset.metadata
 
         # Device for tensorflow-based semantic segmentation
         self.device = (
             '/GPU:0' if tf.config.list_physical_devices('GPU') else '/CPU:0')
-
-        self.params = {
-            'device': self.device,
-            'segmentation_model_fn': segmentation_model_fn,
-            'spine_threshold': spine_threshold,
-            'min_spine_size': min_spine_size,
-            'mask_size': mask_size,
-            'min_distance': min_distance,
-            'dendrite_threshold': dendrite_threshold,
-            'min_dendrite_size': min_dendrite_size,
-            'dendrite_dilation_iterations': dendrite_dilation_iterations,
-            'kernel_size': kernel_size,
-            'classifier_model_fn': classifier_model_fn,
-            'classifier_cutoff': classifier_cutoff,
-        }
-
-        for key, value in self.params.items():
-            setattr(self, key, value)
+        self.segmentation_model_fn = segmentation_model_fn
+        self.spine_threshold = spine_threshold
+        self.min_spine_size = min_spine_size
+        self.mask_size = mask_size
+        self.min_distance = min_distance
+        self.dendrite_threshold = dendrite_threshold
+        self.min_dendrite_size = min_dendrite_size
+        self.dendrite_dilation_iterations = dendrite_dilation_iterations
+        self.kernel_size = kernel_size
+        self.classifier_model_fn = classifier_model_fn
+        self.classifier_cutoff = classifier_cutoff
 
         self.load_data()
+
+    @property
+    def params(self) -> dict:
+        return {
+            'device': self.device,
+            'segmentation_model_fn': self.segmentation_model_fn,
+            'spine_threshold': self.spine_threshold,
+            'min_spine_size': self.min_spine_size,
+            'mask_size': self.mask_size,
+            'min_distance': self.min_distance,
+            'dendrite_threshold': self.dendrite_threshold,
+            'min_dendrite_size': self.min_dendrite_size,
+            'dendrite_dilation_iterations': self.dendrite_dilation_iterations,
+            'kernel_size': self.kernel_size,
+            'classifier_model_fn': self.classifier_model_fn,
+            'classifier_cutoff': self.classifier_cutoff,
+        }
 
     def load_data(self) -> None:
         """
@@ -198,10 +213,8 @@ class DatasetSegmenter:
         FileNotFoundError
             If a specified `.h5` file is not found.
         """
-        path = self.dataset.folder.parent
+        path = self._dataset.folder.parent
 
-        # TODO: integrate the batch-analysis file name into
-        # neuronpath naming system
         files = {
             'zscores_CA3': 'zscores_CA3.h5',
             'dFF_CA3': 'dFF_CA3.h5',
@@ -228,8 +241,8 @@ class DatasetSegmenter:
 
         if existing_files:
             for attr, filename in tqdm(
-                    existing_files.items(),
-                    desc="Loading batch data",
+                    existing_files.items(),  # if not overwrite else files.items(),
+                    desc="Loading spines data",
                     total=len(existing_files)):
 
                 file_path = path / filename
@@ -249,7 +262,11 @@ class DatasetSegmenter:
             1 for spine in self.calcium_events_binary_CA3
             if sum(spine) > 0)
 
-    def collect_all_data(self) -> None:
+    def collect_all_data(
+            self,
+            save: bool = True,
+            save_path: str or Path = None,
+    ) -> None:
         """
         Collect and process spine and dendrite segmentation
         data for the entire dataset.
@@ -263,6 +280,11 @@ class DatasetSegmenter:
         for all segmented spines.
         4. Classifies calcium events based on collected z-scores.
         5. Provides a binary array of activated spines.
+
+        Parameters
+        ----------
+        save : bool
+            Set to True to save data in .h5 format. Default is True.
 
         Attributes Updated
         ------------------
@@ -279,7 +301,7 @@ class DatasetSegmenter:
         zscores_BLA : np.ndarray
             Z-scores for BLA spines.
         dFF_BLA : np.ndarray
-            dF/F values for BLA spines.
+            dF/F0 values for BLA spines.
         ts_BLA : np.ndarray
             Timestamps for BLA spines.
         calcium_events_BLA : list
@@ -303,15 +325,18 @@ class DatasetSegmenter:
         (e.g., z-scores, dF/F) for all spines detected during segmentation.
         """
 
+        saving_folder = (
+            self._dataset.folder.parent if save_path is None else save_path)
         (
             segmenters,
             self.spines_data,
             self.dendrites_data
         ) = semantic_segmentation_pipeline(
-            dataset=self.dataset,
+            dataset=self._dataset,
             segmenter=self,
             config=self.params,
-            output_folder=self.dataset.folder.parent
+            save=save,
+            output_folder=saving_folder
         )
 
         self.n_spines = len(self.spines_data)
@@ -331,11 +356,6 @@ class DatasetSegmenter:
                 spine_counter:spine_counter + n_spines_per_roi]
             spine_counter += n_spines_per_roi
 
-        # Sanity check to ensure spine data consistency
-        # assert (
-        #     len(self.spines_data) ==
-        #     ([len(roi.spines_data) for roi in segmenters]))
-
         (
             self.zscores_CA3,
             self.dFF_CA3,
@@ -347,62 +367,86 @@ class DatasetSegmenter:
             segmenters,
             self.spines_data,
             self.device,
-            self.dataset.folder.parent)
+            self._dataset.folder.parent)
+
+    def calcium_events_prediction(
+            self,
+            save: bool = True,
+            save_path: str or Path = None,
+    ) -> None:
+
+        saving_folder = (
+            self._dataset.folder.parent if save_path is None else save_path)
 
         (
-            self.calcium_events_BLA,
-            self.calcium_events_CA3
+            calcium_events_BLA,
+            calcium_events_CA3
         ) = detect_calcium_events(
             self.params,
             self.zscores_BLA,
             self.zscores_CA3,
-            save=True,
-            output_folder=self.dataset.folder.parent
+            save=save,
+            output_folder=saving_folder
         )
 
-        (
-            self.dynamic_threshold_BLA,
-            self.calcium_events_binary_BLA,
-            self.dynamic_threshold_CA3,
-            self.calcium_events_binary_CA3
-        ) = binarize_calcium_events_array(
-            self.calcium_events_BLA,
-            self.calcium_events_CA3,
-            self.params['classifier_cutoff'],
-            save=True,
-            output_folder=self.dataset.folder.parent
-        )
+        self.calcium_events_BLA = calcium_events_BLA
+        self.calcium_events_CA3 = calcium_events_CA3
 
-        self.n_spines_BLA = sum(
-            1 for spine in self.calcium_events_binary_BLA
-            if sum(spine) > 0)
+        # (
+        #     self.dynamic_threshold_BLA,
+        #     self.calcium_events_binary_BLA,
+        #     self.dynamic_threshold_CA3,
+        #     self.calcium_events_binary_CA3
+        # ) = binarize_calcium_events_array(
+        #     self.calcium_events_BLA,
+        #     self.calcium_events_CA3,
+        #     self.params['classifier_cutoff'],
+        #     save=save,
+        #     output_folder=saving_folder
+        # )
 
-        self.n_spines_CA3 = sum(
-            1 for spine in self.calcium_events_binary_CA3
-            if sum(spine) > 0)
+        # self.n_spines_BLA = sum(
+        #     1 for spine in self.calcium_events_binary_BLA
+        #     if sum(spine) > 0)
+
+        # self.n_spines_CA3 = sum(
+        #     1 for spine in self.calcium_events_binary_CA3
+        #     if sum(spine) > 0)
+
+        return calcium_events_BLA, calcium_events_CA3
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self._dataset)
 
     def __getitem__(self, roi_index: int) -> None:
-        if roi_index not in self.dataset.roi_list:
+        if roi_index not in self._dataset.roi_list:
             raise IndexError(
-                f'Roi {roi_index} out of range {len(self.dataset.roi_list)}')
+                f'Roi {roi_index} out of range {len(self._dataset.roi_list)}')
         return self.get_roi(roi_index)
+
+    def __getattr__(self, name: str):
+        return self.__dict__[f"_{name}"]
+
+    def __setattr__(self, name: str, value):
+        self.__dict__[f"_{name}"] = value
 
     def __iter__(self):
         self._current_index = 0
         return self
 
     def __next__(self):
-        if self._current_index < len(self.dataset):
-            roi_segmenter = RoiSegmenter(self.dataset, self._current_index)
+        if self._current_index < len(self._dataset):
+            roi_segmenter = RoiSegmenter(self._dataset, self._current_index)
             self._current_index += 1
             return roi_segmenter
         else:
             raise StopIteration
 
-    def spines_by_branch(self, branch_id: int) -> list:
+    def spines_by_branch(
+            self,
+            branch_id: int,
+            direction: str = None
+    ) -> list:
         """
         Retrieve spines associated with a specific branch ID.
 
@@ -410,6 +454,9 @@ class DatasetSegmenter:
         ----------
         branch_id : int
             Branch ID to filter spines.
+        direction: str
+            If spines coordinates should be flattened in the 'vertical'
+            or 'horizontal' direction. Default is None.
 
         Returns
         -------
@@ -418,12 +465,32 @@ class DatasetSegmenter:
             Sublist of self.spines_data.
         """
 
-        if branch_id not in np.arange(self.dataset.sf.n_branches):
+        if branch_id not in np.arange(self._dataset.sf.n_branches):
             raise IndexError("Branch id out of range.")
 
-        return [
+        spines = [
             spine for spine in self.spines_data
             if spine['branch_id'] == branch_id]
+
+        if not spines:
+            raise ValueError("Selected branch has no detected spines.")
+
+        if not direction:
+            return spines
+
+        if direction not in ["horizontal", "vertical"]:
+            raise ValueError("Unrecognized direction."
+                             "Should be `horizontal` or `vertical`.")
+
+        translation, angle = (
+            self._dataset.morph.neuron.get_branch(branch_id).flat(
+                direction, return_params=True))
+
+        return rotate_and_transform_spines(
+            spines,
+            translation,
+            angle,
+            self._dataset.morph.objective_resolution)
 
     def spines_by_branch_degree(self, branch_degree: int) -> list:
         """
@@ -504,7 +571,7 @@ class DatasetSegmenter:
 
         return np.array(data_batch)[spine_indices] if data_batch else []
 
-    @ cache
+    @cache
     def get_roi(self, roi_index: int) -> object:
         """
         Retrieve a specific ROI's segmentation and associated data.
@@ -563,7 +630,7 @@ class DatasetSegmenter:
         return RoiSegmenter(
             roi_index,
             roi_metadata,
-            self.dataset[roi_index],
+            self._dataset[roi_index],
             self.params,
             selected_dFF_CA3,
             selected_zscore_CA3,
@@ -601,8 +668,8 @@ class DatasetSegmenter:
         spine_color : str | tuple, optional
             Color of the spines in the plot. Default is (1, 0, 1) (magenta).
         ax : plt.Axes, optional
-            Matplotlib Axes object to plot on. If None, a new figure is created.
-            Default is None.
+            Matplotlib Axes object to plot on. If None,
+            a new figure is created. Default is None.
         fontsize : int, optional
             Font size for annotations. Default is 10.
         scan_angle : bool, optional
@@ -626,6 +693,91 @@ class DatasetSegmenter:
             fontsize=fontsize,
             scan_angle=scan_angle,
             **kwargs)
+
+    def animate_spines(
+        self,
+        figsize: tuple = (8, 8),
+        spines: list = None,
+        spine_size: int = 20,
+        spine_color: str = "grey",
+        show_ticks: bool = False,
+        use_cmap: bool = False,
+        cmap: str = "viridis",
+        elev_start: float = -30,
+        elev_end: float = 60,
+        azim_start: float = 0,
+        azim_end: float = 360,
+        interval: int = 100,
+        frames: int = 100,
+        axis_lims: list = None,
+        scan_angle: bool = False,
+        save_path: str = None,
+        neuron_orientation: str = 'horizontal',
+        **kwargs
+    ) -> None:
+        """
+        Animate detected spines in 3D space.
+
+        Parameters
+        ----------
+        spines : list, optional
+            List of spines to animate. If None, defaults to `self.spines_data`.
+        spine_size : int, optional
+            Size of the spine markers in the animation. Default is 30.
+        spine_color : str, optional
+            Color of the spines. Default is 'cyan'.
+        cmap : str, optional
+            Colormap for the z-coordinate. Default is 'viridis'.
+        elev_start : float, optional
+            Starting elevation angle for animation. Default is 30.
+        elev_end : float, optional
+            Ending elevation angle for animation. Default is 30.
+        azim_start : float, optional
+            Starting azimuth angle for animation. Default is 0.
+        azim_end : float, optional
+            Ending azimuth angle for animation. Default is 360.
+        interval : int, optional
+            Interval between frames in milliseconds. Default is 100.
+        frames : int, optional
+            Total number of frames in the animation. Default is 100.
+        axis_lims : list, optional
+            Axis limits as [xmin, xmax, ymin, ymax, zmin, zmax].
+            If None, limits are determined automatically.
+        scan_angle : bool, optional
+            If True, uses scan angle units for coordinates.
+            Default is False.
+        save_path : str, optional
+            Path to save the animation. If None, the animation is not saved.
+        **kwargs : dict, optional
+            Additional keyword arguments passed to the animation function.
+
+        Returns
+        -------
+        None
+            Displays the animation or saves it if `save_path` is specified.
+        """
+        spines = self.spines_data if spines is None else spines
+
+        return animate_spines_3d(
+            spines=spines,
+            figsize=figsize,
+            scan_angle=scan_angle,
+            spine_size=spine_size,
+            spine_color=spine_color,
+            show_ticks=show_ticks,
+            use_cmap=use_cmap,
+            cmap=cmap,
+            elev_start=elev_start,
+            elev_end=elev_end,
+            azim_start=azim_start,
+            azim_end=azim_end,
+            interval=interval,
+            frames=frames,
+            axis_lims=axis_lims,
+            save_path=save_path,
+            neuron_orientation=neuron_orientation,
+            **kwargs
+        )
 
     def plot_events_spines(
             self,
@@ -652,23 +804,28 @@ class DatasetSegmenter:
             List of spines to consider for plotting.
             Default is all spines with `self.spines_data`.
         input_type : str, optional
-            The data type to use for event analysis ('BLA' or 'CA3'). Default is 'BLA'.
+            The data type to use for event analysis ('BLA' or 'CA3').
+            Default is 'BLA'.
         n_event_threshold : int, optional
-            Minimum number of events required for a spine to be considered active.
-            Default is 0.
+            Minimum number of events required for a spine to be considered
+            active. Default is 0.
         spine_size : int, optional
-            Size of the markers representing spines in the plot. Default is 20.
+            Size of the markers representing spines in the plot.
+            Default is 20.
         ax : plt.Axes, optional
-            Matplotlib Axes object to draw the plot on. If None, a new figure and Axes
-            are created. Default is None.
+            Matplotlib Axes object to draw the plot on. If None, a new figure
+            and Axes are created. Default is None.
         fontsize : int, optional
             Font size for plot labels and annotations. Default is 10.
         cmap : str, optional
-            Colormap used to represent the event counts for each spine. Default is 'viridis'.
+            Colormap used to represent the event counts for each spine.
+            Default is 'viridis'.
         show_cmap : bool, optional
-            Whether to display the colormap bar alongside the plot. Default is True.
+            Whether to display the colormap bar alongside the plot.
+            Default is True.
         scan_angle : bool, optional
-            Whether to display the plot in scan angle degree units. Default is False
+            Whether to display the plot in scan angle degree units.
+            Default is False
         zorder : int, optional
             Increase to plot on top. Default is 1.
 
@@ -684,19 +841,27 @@ class DatasetSegmenter:
 
         Notes
         -----
-        - This function highlights spines based on their activity levels (calcium events).
-        - Active spines are colored according to the number of events they have,
-        with the color intensity determined by the `cmap`.
+        - This function highlights spines based on their activity levels
+            (calcium events).
+        - Active spines are colored according to the number of events
+            they have, with the color intensity determined by the `cmap`.
         """
+        if input_type not in ['BLA', 'CA3']:
+            raise ValueError("Incorrect input type")
 
         spines = self.spines_data if not spines else spines
+        spines_indices = [spine["spine_index"] for spine in spines]
 
-        if input_type == 'BLA':
-            events = self.calcium_events_binary_BLA
-        elif input_type == 'CA3':
-            events = self.calcium_events_binary_CA3
-        else:
-            raise ValueError("Incorrect input type")
+        events = [None] * len(spines)
+        events_list = (
+            self.calcium_events_binary_BLA
+            if input_type == 'BLA'
+            else self.calcium_events_binary_CA3)
+
+        for i, idx in enumerate(spines_indices):
+            events[i] = events_list[idx]
+
+        assert len(spines) == len(events)
 
         return plot_events_spines(
             spines=spines,
@@ -713,6 +878,140 @@ class DatasetSegmenter:
             zorder=zorder,
             **kwargs)
 
+    def animate_event_spines(
+        self,
+        spines: list = None,
+        spines_BLA: list = None,
+        spines_CA3: list = None,
+        n_event_threshold: int = 1,
+        figsize: tuple = (14, 14),
+        scan_angle: bool = False,
+        spine_size: int = 8,
+        spine_color: str = 'lightgray',
+        spine_edgecolor: str = None,
+        BLA_spine_size: int = 40,
+        CA3_spine_size: int = 40,
+        BLA_spine_color: str = '#46A4B9',
+        CA3_spine_color: str = '#B95B46',
+        BLA_spine_edgecolor: str = 'black',
+        CA3_spine_edgecolor: str = 'black',
+        show_ticks: bool = True,
+        elev_start: float = 10,
+        elev_end: float = 10,
+        azim_start: float = 20,
+        azim_end: float = 360,
+        interval: int = 150,
+        frames: int = 120,
+        axis_lims: list = None,
+        save_path: str = None,
+        neuron_orientation: str = 'horizontal',
+    ) -> None:
+        """
+        Animate spines (including BLA and CA3) in a 3D scatter plot.
+
+        Parameters
+        ----------
+        spines : list, optional
+            Main list of spines. Defaults to `self.spines_data` if None.
+        spines_BLA : list, optional
+            List of BLA-specific spines.
+        spines_CA3 : list, optional
+            List of CA3-specific spines.
+        n_event_threshold : int, optional
+            Minimum number of calcium events to consider
+            for filtering BLA and CA3 spines.
+        figsize : tuple, optional
+            Size of the figure. Default is (8, 8).
+        scan_angle : bool, optional
+            Whether to use scan angle units. Default is False.
+        spine_size : int, optional
+            Size of the main spine markers.
+        spine_color : str, optional
+            Color of the main spine markers.
+        spine_edgecolor : str, optional
+            Color of the main spine marker edges.
+        BLA_spine_size : int, optional
+            Size of the BLA spine markers.
+        CA3_spine_size : int, optional
+            Size of the CA3 spine markers.
+        BLA_spine_color : str, optional
+            Color of the BLA spine markers.
+        CA3_spine_color : str, optional
+            Color of the CA3 spine markers.
+        BLA_edgecolor : str, optional
+            Color of BLA spines marker edges.
+        CA3_edgecolor : str, optional
+            Color of CA3 spines marker edges.
+        show_ticks : bool, optional
+            Whether to show axis ticks. Default is True.
+        elev_start : float, optional
+            Starting elevation angle. Default is 30.
+        elev_end : float, optional
+            Ending elevation angle. Default is 60.
+        azim_start : float, optional
+            Starting azimuth angle. Default is 0.
+        azim_end : float, optional
+            Ending azimuth angle. Default is 360.
+        interval : int, optional
+            Interval between frames in milliseconds. Default is 100.
+        frames : int, optional
+            Number of frames in the animation. Default is 120.
+        axis_lims : list, optional
+            Axis limits as [xmin, xmax, ymin, ymax, zmin, zmax].
+        save_path : str, optional
+            Path to save the animation. If None, it will not save.
+        neuron_orientation : str, optional
+            Display orientation of the neuron ('horizontal' or 'vertical').
+            Default is 'horizontal'.
+
+        Returns
+        -------
+        None
+        """
+        # Use self.spines_data if spines are not provided
+        spines = self.spines_data if spines is None else spines
+
+        if spines_BLA is None:
+            all_bla_spines = self.spines_by_calcium(
+                input_type="BLA",
+                n_event_threshold=n_event_threshold)
+            spines_BLA = [
+                spine for spine in spines if spine in all_bla_spines]
+
+        if spines_CA3 is None:
+            all_ca3_spines = self.spines_by_calcium(
+                input_type="CA3",
+                n_event_threshold=n_event_threshold)
+            spines_CA3 = [
+                spine for spine in spines if spine in all_ca3_spines]
+
+        return animate_event_spines_3d(
+            spines=spines,
+            spines_BLA=spines_BLA,
+            spines_CA3=spines_CA3,
+            figsize=figsize,
+            scan_angle=scan_angle,
+            spine_size=spine_size,
+            spine_color=spine_color,
+            spine_edgecolor=spine_edgecolor,
+            BLA_spine_size=BLA_spine_size,
+            CA3_spine_size=CA3_spine_size,
+            BLA_spine_color=BLA_spine_color,
+            CA3_spine_color=CA3_spine_color,
+            BLA_spine_edgecolor=BLA_spine_edgecolor,
+            CA3_spine_edgecolor=CA3_spine_edgecolor,
+            show_ticks=show_ticks,
+            elev_start=elev_start,
+            elev_end=elev_end,
+            azim_start=azim_start,
+            azim_end=azim_end,
+            interval=interval,
+            frames=frames,
+            axis_lims=axis_lims,
+            save_path=save_path,
+            neuron_orientation=neuron_orientation,
+        )
+
     def sholl(
             self,
             morphology: object,
@@ -721,6 +1020,8 @@ class DatasetSegmenter:
             spines: list = None,
             input_type: str = None,
             n_event_threshold: int = 0,
+            show_plot: bool = True,
+            show_sholl_curve: bool = True,
             ax: plt.Axes = None,
             ax_sholl_curve: plt.Axes = None,
             circle_color: str = 'gray',
@@ -734,6 +1035,7 @@ class DatasetSegmenter:
             fontsize: int = 12,
             cmap: str = 'viridis',
             colorbar_orientation: str = 'vertical',
+            scan_angle: bool = False,
             **kwargs
     ) -> np.ndarray:
         """
@@ -758,7 +1060,8 @@ class DatasetSegmenter:
             Matplotlib Axes object for plotting the Sholl
             analysis in 2D space. Default is None.
         ax_sholl_curve : plt.Axes, optional
-            Matplotlib Axes object for plotting the Sholl intersection curve. Default is None.
+            Matplotlib Axes object for plotting the Sholl intersection curve.
+            Default is None.
         circle_color : str, optional
             Color of the concentric circles in the plot. Default is 'gray'.
         circle_linestyle : str, optional
@@ -766,11 +1069,13 @@ class DatasetSegmenter:
         circle_linewidth : int or float, optional
             Line width for the concentric circles. Default is 1.
         countline_color : str, optional
-            Color of the lines representing intersection counts in the plot. Default is 'black'.
+            Color of the lines representing intersection counts in the plot.
+            Default is 'black'.
         countline_width : int or float, optional
             Line width for the intersection count lines. Default is 1.
         countline_style : str, optional
-            Linestyle for the intersection count lines. Default is None (solid line).
+            Linestyle for the intersection count lines.
+            Default is None (solid line).
         countline_alpha : float, optional
             Transparency of the intersection count lines. Default is 0.5.
         size : int or float, optional
@@ -778,9 +1083,11 @@ class DatasetSegmenter:
         fontsize : int, optional
             Font size for plot annotations and labels. Default is 12.
         cmap : str, optional
-            Colormap used to represent spine activity or other properties. Default is 'viridis'.
+            Colormap used to represent spine activity or other properties.
+            Default is 'viridis'.
         colorbar_orientation : str, optional
-            Orientation of the colorbar ('vertical' or 'horizontal'). Default is 'vertical'.
+            Orientation of the colorbar ('vertical' or 'horizontal').
+            Default is 'vertical'.
 
         Returns
         -------
@@ -790,14 +1097,16 @@ class DatasetSegmenter:
         Raises
         ------
         ValueError
-            If an invalid `input_type` is provided (must be 'BLA', 'CA3', or None).
+            If an invalid `input_type` is provided
+            (must be 'BLA', 'CA3',or None).
 
         Notes
         -----
-        - Sholl analysis is used to quantify the distribution of spines or activated spines
-        (BLA or CA3) as a function of radial distance from the soma.
-        - The concentric circles represent different distances, and the intersections
-        quantify how many spines lie within each radius.
+        - Sholl analysis is used to quantify the distribution of spines
+            or activated spines (BLA or CA3) as a function of radial distance
+            from the soma.
+        - The concentric circles represent different distances,
+        and the intersections quantify how many spines lie within each radius.
         """
 
         # TODO: having implemented the choice of passing a subset of spines,
@@ -822,6 +1131,8 @@ class DatasetSegmenter:
             spines=spines,
             events=events,
             n_event_threshold=n_event_threshold,
+            show_plot=show_plot,
+            show_sholl_curve=show_sholl_curve,
             ax=ax,
             ax_sholl_curve=ax_sholl_curve,
             circle_color=circle_color,
@@ -835,16 +1146,23 @@ class DatasetSegmenter:
             fontsize=fontsize,
             cmap=cmap,
             colorbar_orientation=colorbar_orientation,
+            scan_angle=scan_angle,
             **kwargs)
 
     def plot_zscores(
             self,
             spines: list = None,
+            ax: plt.Axes = None,
+            figsize: tuple = (10, 6),
             input_type: str = None,
             average: bool = False,
             sort: bool = False,
             sort_window: tuple = (16, 21),
             cmap: str = "viridis",
+            cmap_extent: list = None,
+            fontsize: int = 10,
+            cbar_shrink: float = 0.5,
+            xlim: tuple = None,
             **kwargs
     ) -> None:
         """
@@ -854,33 +1172,50 @@ class DatasetSegmenter:
         ----------
         spines : list, optional
             List of spines to plot. Default is None, plotting all spines.
+        ax : plt.Axes, optional
+            Matplotlib Axes object to plot on. If None, a new figure is created.
+        figsize : tuple, optional
+            Size of the figure. Default is (10, 6).
         input_type : str, optional
             Specifies the source of z-scores to plot. Expected values are:
             - "CA3" for CA3 spine z-scores.
             - "BLA" for BLA spine z-scores.
             - None (default) to plot z-scores for all input types.
         average : bool, optional
-            If True, plot the average z-score across sweeps for each spine 
+            If True, plot the average z-score across sweeps for each spine
             (default is False, showing all sweeps).
         sort : bool, optional
-            If True, sort spines based on the average z-score before plotting 
+            If True, sort spines based on the average z-score before plotting
             (default is False, maintaining the original order).
+        sort_window : tuple, optional
+            Window size for sorting spines based on the average z-score.
+            Default is (16, 21).
+        cmap : str, optional
+            Colormap for the heatmap. Default is 'viridis'.
+        cmap_extent : list, optional
+            Colorbar extent for the colormap. Default is None.
+        fontsize : int, optional
+            Font size for plot annotations and labels. Default is 10.
+        cbar_shrink : float, optional
+            Shrinkage factor for the colorbar. Default is 0.5.
+        xlim : tuple, optional
+            Limits for the x-axis. Default is None.
 
         Returns
         -------
         None
-            The function generates and displays a heatmap of z-scores using the 
-            `plot_all_zscore_heatmap` utility.
+            The function generates and displays a heatmap of z-scores
+            using the `plot_all_zscore_heatmap` utility.
 
         Notes
         -----
-        - The heatmap provides a visual representation of z-score distributions 
-        for each spine, with color intensity indicating the magnitude of the 
-        z-scores.
-        - Sorting allows for better visual differentiation of spines based on 
-        activity levels.
-        - Averaging reduces data dimensionality and highlights overall trends 
-        across sweeps.
+        - The heatmap provides a visual representation of z-score
+            distributions for each spine, with color intensity
+            indicating the magnitude of the z-scores.
+        - Sorting allows for better visual differentiation of spines
+            based on activity levels.
+        - Averaging reduces data dimensionality and highlights overall trends
+            across sweeps.
 
         Example
         -------
@@ -888,26 +1223,29 @@ class DatasetSegmenter:
         >>> segmenter.plot_zscores(input_type="CA3", average=True, sort=True)
         """
 
-        # FIXME: the passed spine_data has no intrinsic spine_index.
-        # A solution could be adding this to the spine_data
-        # or passing the spine_index as a separate list
-        
         spines = self.spines_data if not spines else spines
 
         return plot_zscore_heatmap(
             all_spines_instance=self,
             spines=spines,
+            ax=ax,
+            figsize=figsize,
             input_type=input_type,
             average=average,
             sort=sort,
             sort_window=sort_window,
             cmap=cmap,
+            cmap_extent=cmap_extent,
+            fontsize=fontsize,
+            cbar_shrink=cbar_shrink,
+            xlim=xlim,
             **kwargs)
 
 
 class RoiSegmenter:
     """
-    Manage segmentation and analysis of spines and dendrites for a specific ROI.
+    Manage segmentation and analysis of spines and dendrites
+    for a specific ROI.
 
     This class provides methods for:
     - Performing inference to segment spines and dendrites.
@@ -1010,7 +1348,8 @@ class RoiSegmenter:
 
     Notes
     -----
-    - Metadata and configuration parameters are added as attributes to the instance.
+    - Metadata and configuration parameters are added as attributes
+        to the instance.
     - The `base_image` used for segmentation is generated `get_base_image()`.
     - The number of spines in the ROI is determined and stored in `n_spines`.
     """
@@ -1047,8 +1386,8 @@ class RoiSegmenter:
         """
         Generate a base image from the ROI for spine segmentation.
 
-        Combines frames across sweeps, subtracts minimum pixel values, and generates a
-        max projection image.
+        Combines frames across sweeps, subtracts minimum pixel values,
+        and generates a max projection image.
 
         Returns
         -------
@@ -1090,7 +1429,8 @@ class RoiSegmenter:
         Parameters
         ----------
         segmentation_model_fn : str or Path, optional
-            Path to the segmentation model. If not provided, uses `self.segmentation_model_fn`.
+            Path to the segmentation model.
+            If not provided, uses `self.segmentation_model_fn`.
 
         Raises
         ------
@@ -1126,9 +1466,10 @@ class RoiSegmenter:
             image_cmap: str = 'binary_r',
             spines_cmap: str = 'gist_rainbow',
             spine_mask_alpha: float = 0.5,
-            enumerate: bool = True,
+            enum: bool = True,
             enumerate_fontsize: int = 12,
             fontsize: int = 14,
+            ax: plt.Axes = None,
     ) -> None:
         """
         Visualize segmented spine masks over the base image.
@@ -1144,7 +1485,8 @@ class RoiSegmenter:
         spines_cmap : str, optional
             Colormap to use for the spine masks. Default is 'gist_rainbow'.
         spine_mask_alpha : float, optional
-            Transparency level for the spine masks. Default is 0.5 (50% transparency).
+            Transparency level for the spine masks.
+            Default is 0.5 (50% transparency).
         enumerate : bool, optional
             Enumerate spines with their indices and centroid. Default is True.
         fontsize : int, optional
@@ -1162,8 +1504,10 @@ class RoiSegmenter:
 
         Notes
         -----
-        - This method internally calls `plot_spine_pixel_annotation` for visualization.
-        - Ensure that spine data (`self.spines_data`) is available before calling this method.
+        - This method internally calls `plot_spine_pixel_annotation`
+            for visualization.
+        - Ensure that spine data (`self.spines_data`) is available
+            before calling this method.
         """
 
         if self.spines_data is None:
@@ -1175,9 +1519,10 @@ class RoiSegmenter:
             image_cmap=image_cmap,
             spines_cmap=spines_cmap,
             spine_mask_alpha=spine_mask_alpha,
-            enumerate=enumerate,
+            enum=enum,
             enumerate_fontsize=enumerate_fontsize,
-            fontsize=fontsize)
+            fontsize=fontsize,
+            ax=ax)
 
     def plot_dFF(
             self,
@@ -1277,7 +1622,7 @@ class RoiSegmenter:
         else:
             raise StopIteration
 
-    @ cache
+    @cache
     def get_spine(self, spine_index: int) -> object:
         """
         Retrieve a specific spine's data.
@@ -1293,18 +1638,29 @@ class RoiSegmenter:
             Spine object containing its data and associated time series.
         """
 
-        selected_dFF_CA3 = (self.dFF_CA3[spine_index]
-                            if len(self.dFF_CA3) > 0 else [])
-        selected_zscore_CA3 = (self.zscore_CA3[spine_index]
-                               if len(self.zscore_CA3) > 0 else [])
-        selected_ts_CA3 = (self.ts_CA3[spine_index]
-                           if len(self.ts_CA3) > 0 else [])
-        selected_dFF_BLA = (self.dFF_BLA[spine_index]
-                            if len(self.dFF_BLA) > 0 else [])
-        selected_zscore_BLA = (self.zscore_BLA[spine_index]
-                               if len(self.zscore_BLA) > 0 else [])
-        selected_ts_BLA = (self.ts_BLA[spine_index]
-                           if len(self.ts_BLA) > 0 else [])
+        selected_dFF_CA3 = (
+            self.dFF_CA3[spine_index]
+            if len(self.dFF_CA3) > 0 else [])
+
+        selected_zscore_CA3 = (
+            self.zscore_CA3[spine_index]
+            if len(self.zscore_CA3) > 0 else [])
+
+        selected_ts_CA3 = (
+            self.ts_CA3[spine_index]
+            if len(self.ts_CA3) > 0 else [])
+
+        selected_dFF_BLA = (
+            self.dFF_BLA[spine_index]
+            if len(self.dFF_BLA) > 0 else [])
+
+        selected_zscore_BLA = (
+            self.zscore_BLA[spine_index]
+            if len(self.zscore_BLA) > 0 else [])
+
+        selected_ts_BLA = (
+            self.ts_BLA[spine_index]
+            if len(self.ts_BLA) > 0 else [])
 
         return Spine(
             spine_index,
@@ -1362,6 +1718,8 @@ class Spine:
             rolling_bsl: str = 'centered',
             window_sec: float = 0.5,
             min_quantile: int = 10,
+            denoise: str = "modified_okada",
+            denoise_kwargs: dict = {"window_length": 7, "polyorder": 3}
     ) -> np.ndarray:
 
         with tf.device(self.device):
@@ -1371,7 +1729,10 @@ class Spine:
                 sweep_index=sweep_index,
                 rolling_bsl=rolling_bsl,
                 window_sec=window_sec,
-                min_quantile=min_quantile,)
+                min_quantile=min_quantile,
+                denoise=denoise,
+                denoise_kwargs=denoise_kwargs
+            )
 
             return dff.numpy()
 
