@@ -89,9 +89,10 @@ def plot_spine_pixel_annotation(
         image_cmap: str,
         spines_cmap: str,
         spine_mask_alpha: float,
-        enumerate: bool,
+        enum: bool,
         enumerate_fontsize: int,
         fontsize: int,
+        ax: plt.Axes,
 ) -> None:
     """
     Overlay segmented spine masks onto a base image for visualization.
@@ -116,7 +117,7 @@ def plot_spine_pixel_annotation(
     spine_mask_alpha : float
         Transparency level for the spine masks. Should be a value between 0 and 1,
         where 0 is fully transparent and 1 is fully opaque.
-    enumerate : bool
+    enum : bool
         If True, spines will be enumerated on the plot with their indices.
     enumerate_fontsize : int
         Font size for the spine labels.
@@ -135,7 +136,8 @@ def plot_spine_pixel_annotation(
     - The centroid of each spine is marked and optionally annotated with its index.
     """
 
-    _, ax = plt.subplots(layout="constrained")
+    if not ax:
+        _, ax = plt.subplots(layout="constrained")
     ax.set_aspect('equal')
 
     ax.imshow(base_image, cmap=image_cmap)
@@ -164,7 +166,7 @@ def plot_spine_pixel_annotation(
         # Overlay this colored mask onto the existing image in the axes
         ax.imshow(colored_mask, interpolation='none')
 
-        if enumerate:
+        if enum:
             ax.scatter(
                 spine.centroid_pix[0],
                 spine.centroid_pix[1],
@@ -236,7 +238,7 @@ def plot_spine_calcium_traces(
 
         axes[0].set_xlabel("Time (s)", fontsize=fontsize)
         axes[0].set_ylabel("Spines", fontsize=fontsize)
-        axes[0].set_ylims(y_offsets[-1], y_offsets[0])
+        axes[0].set_ylim(y_offsets[-1], y_offsets[0])
         axes[0].set_xlim(0, 3.5)
 
         for i, spine in enumerate(

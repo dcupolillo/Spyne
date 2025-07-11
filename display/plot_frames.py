@@ -17,15 +17,16 @@ def animate_frames(
     """
     Display a sequence of frames as an animated loop.
 
-    This function visualizes imaging frames using OpenCV, allowing for side-by-side
-    display of multiple active channels and optional timestamp annotations.
+    This function visualizes imaging frames using OpenCV,
+    allowing for side-by-side display of multiple active channels
+    and optional timestamp annotations.
 
     Parameters
     ----------
     frames : np.ndarray
-        A sequence of frames to display, either as single-channel or multi-channel.
-        For multi-channel input, frames should have shape 
-        (n_frames, n_channels, height, width).
+        A sequence of frames to display, either as single-channel or
+        multi-channel. For multi-channel input, frames should have
+        shape (n_frames, n_channels, height, width).
     frame_rate : float
         The display rate of the frames, in frames per second.
     active_channels : list, optional
@@ -45,7 +46,8 @@ def animate_frames(
 
     Notes
     -----
-    - The function automatically normalizes frames to the 8-bit range for displaying.
+    - The function automatically normalizes frames to the 8-bit range
+        for displaying.
     - The display window is upscaled for better visibility.
     - Timestamps are added to frames based on the provided frame rate.
 
@@ -58,7 +60,11 @@ def animate_frames(
     if timestamps:
         timestamps = np.linspace(0, scan_duration, n_frames)
 
-    norm_values = norm if norm else (0, 255)
+    if norm is None:
+        vmin = 0
+        vmax = 255
+    else:
+        vmin, vmax = norm
 
     if not active_channels:
         frame_height, frame_width = frames[0].shape
@@ -74,7 +80,7 @@ def animate_frames(
                 frame_normalized = cv2.normalize(
                     channel_frame,
                     None,
-                    norm_values[0], norm_values[1],
+                    vmin, vmax,
                     cv2.NORM_MINMAX,
                     dtype=cv2.CV_8U)
 
@@ -95,7 +101,7 @@ def animate_frames(
             frame_normalized = cv2.normalize(
                 frame,
                 None,
-                norm_values[0], norm_values[1],
+                vmin, vmax,
                 cv2.NORM_MINMAX,
                 dtype=cv2.CV_8U)
 
