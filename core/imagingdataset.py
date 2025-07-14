@@ -580,7 +580,7 @@ class Channel:
 
     def save(
             self,
-            output_file: str or Path,
+            output_file: str or Path = None,
             timestamps: bool = False,
             norm: list or tuple or np.ndarray = None
     ) -> None:
@@ -602,7 +602,7 @@ class Channel:
         None
         """
 
-        if not output_file:
+        if output_file is None:
             output_file = self.filename.with_suffix('.avi')
 
         print(f'Saved! at {output_file}')

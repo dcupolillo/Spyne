@@ -2,7 +2,6 @@ from tqdm import tqdm
 import tifffile
 import numpy as np
 from skimage.util import img_as_uint
-import skimage
 from scipy.ndimage import median_filter
 from spyne.core.utils.pyabf_adc import get_digital_output_list
 from spyne.core.utils.movie_utils import rows_deviation, modify_frames
@@ -16,7 +15,7 @@ def load_metadata_from_tiff(
 
     rect_periods = [
         rect.rectangle_period
-        for zplane in dataset_instance.sf.neuComp
+        for zplane in dataset_instance._sf.neuron
         for rect in zplane]
 
     unique_roifile_list = list(
@@ -40,7 +39,7 @@ def load_metadata_from_tiff(
 
     dataset_instance.coplanar_n = [
         rect.z_ind
-        for zplane in dataset_instance.sf.neuComp
+        for zplane in dataset_instance._sf.neuron
         for rect in zplane]
 
     # Retrieve metadata
@@ -61,7 +60,7 @@ def load_metadata_from_tiff(
             roigroup_data = (
                 scanimage_metadata['RoiGroups']['imagingRoiGroup'])
             rois = roigroup_data['rois']
-            
+
             rois_list = []
             if isinstance(rois, dict):
                 rois_list.append(rois)
@@ -75,16 +74,17 @@ def load_metadata_from_tiff(
                 # sanity check for single roi extracted metadata
                 if not isinstance(roi, dict):
                     raise TypeError("Error in metadata type.")
-                
+
                 # Call the corresponding ROIpy.Scanfields.Roi object
                 # BUG: there is sometimes uncorrespondence between
                 # the metadata saved during data acquisition
-                # and generated ROIs in ROIpy. Probably due to ROIpy 
+                # and generated ROIs in ROIpy. Probably due to ROIpy
                 # updating following data collection (.roi files generated
                 # at a previous time).
+
                 try:
                     roi_in_scanfield_object = (
-                        dataset_instance.sf.neuComp[file_n][n_roi_in_z])
+                        dataset_instance._sf.neuron[file_n][n_roi_in_z])
                 except:
                     print(file_n, file_path)
                     break
@@ -117,13 +117,13 @@ def load_metadata_from_tiff(
                 # Take ROIpy.Scanfields.Roi specific metadata
                 branch_degree = roi_in_scanfield_object.branch_degree
                 branch_id = roi_in_scanfield_object.branch_id
-                
+
                 # NOTE: I'd rather take this info from ROIpy.Scanfields
                 # objects for correspondence reasons, as after data
                 # acquisition, ScanImage applies new UUIDs to ROIs
                 roi_uuid = roi_in_scanfield_object.roi_uuid
                 roi_uuid_uint64 = roi_in_scanfield_object.roi_uuid_uint64
-                
+
                 # Write the metadata entry
                 metadata.append({
                     'objective resolution':
