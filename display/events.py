@@ -3,13 +3,11 @@
 
 
 import numpy as np
+from pathlib import Path
 import matplotlib.pyplot as plt
-from dataplotter import ElectrophyPlotter
 from tqdm import tqdm
-from scipy.spatial import Voronoi
 from spyne.neuralnetwork.spine_segmentation.spine_segmentation import (
     calculate_centroid)
-from spyne.core.utils.utils import transform
 
 
 def _format_axes(
@@ -60,7 +58,8 @@ def _format_axes(
             f"Invalid spines in hide_axes: {set(hide_axes) - valid_spines}")
     if not set(offset_axes).issubset(valid_spines):
         raise ValueError(
-            f"Invalid spines in offset_axes: {set(offset_axes) - valid_spines}")
+            "Invalid spines in offset_axes: "
+            f"{set(offset_axes) - valid_spines}")
     if not isinstance(axes, (plt.Axes, np.ndarray)):
         raise ValueError(
             "Input axes must be a matplotlib Axes object or an array of Axes.")
@@ -93,6 +92,7 @@ def plot_spine_pixel_annotation(
         enumerate_fontsize: int,
         fontsize: int,
         ax: plt.Axes,
+        output_filename: str or Path,
 ) -> None:
     """
     Overlay segmented spine masks onto a base image for visualization.
@@ -115,7 +115,8 @@ def plot_spine_pixel_annotation(
     spines_cmap : str
         Colormap for coloring the individual spine masks.
     spine_mask_alpha : float
-        Transparency level for the spine masks. Should be a value between 0 and 1,
+        Transparency level for the spine masks.
+        Should be a value between 0 and 1,
         where 0 is fully transparent and 1 is fully opaque.
     enum : bool
         If True, spines will be enumerated on the plot with their indices.
@@ -132,12 +133,13 @@ def plot_spine_pixel_annotation(
     Notes
     -----
     - The function normalizes each spine mask to ensure binary values (0 or 1)
-      before applying color.
-    - The centroid of each spine is marked and optionally annotated with its index.
+        before applying color.
+    - The centroid of each spine is marked and optionally
+        annotated with its index.
     """
 
     if not ax:
-        _, ax = plt.subplots(layout="constrained")
+        fig, ax = plt.subplots(layout="constrained")
     ax.set_aspect('equal')
 
     ax.imshow(base_image, cmap=image_cmap)
@@ -146,6 +148,9 @@ def plot_spine_pixel_annotation(
     ax.set_ylabel("", fontsize=fontsize)
 
     cmap = plt.get_cmap(spines_cmap, spines.n_spines)
+
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
 
     for i, spine in enumerate(spines):
 
@@ -172,14 +177,25 @@ def plot_spine_pixel_annotation(
                 spine.centroid_pix[1],
                 color=color)
 
+            x = np.clip(
+                spine.centroid_pix[0], xlim[0] + 5, xlim[1] - 5)
+            y = np.clip(
+                spine.centroid_pix[1], ylim[1] + 5, ylim[0] - 5)
+
             ax.text(
-                spine.centroid_pix[0],
-                spine.centroid_pix[1],
+                x,
+                y,
                 str(i + 1),
                 color=color,
                 fontsize=enumerate_fontsize,
                 ha='center',
                 va='bottom')
+
+    if output_filename is not None:
+        ax.axis('off')
+        fig.savefig(
+            output_filename, bbox_inches='tight', pad_inches=0)
+        print(f'Saved! as {output_filename}')
 
 
 def plot_spine_calcium_traces(

@@ -61,11 +61,12 @@ class ImagingDataset:
             If the imaging path is invalid, non-existent, or empty.
         """
 
+        if not folder.exists():
+            raise Exception(f"{folder} does not exist.")
+
         if not folder.is_dir():
             raise Exception(f"{folder} must be a path to a FOLDER.")
 
-        if not folder.exists():
-            raise Exception(f"{folder} does not exist.")
 
         if not any(folder.iterdir()):
             raise Exception(f"{folder} is empty.")

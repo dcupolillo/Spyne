@@ -86,6 +86,7 @@ class DatasetSegmenter:
                 r"C:/Users/dcupolillo/Projects/spyne/"
                 r"neuralnetwork/zscore_decoder/models/"
                 r"250529_imbalanced_dataset_trial_17_model.pth"),
+            # FIXME: find a better binarization strategy
             classifier_cutoff: int = 99,
     ) -> None:
         """
@@ -630,8 +631,6 @@ class DatasetSegmenter:
         """
 
         return np.array(data_batch)[spine_indices] if data_batch else []
-
-
 
     def plot_spines(
             self,
@@ -1459,6 +1458,7 @@ class RoiSegmenter:
             enumerate_fontsize: int = 12,
             fontsize: int = 14,
             ax: plt.Axes = None,
+            output_filename: str or Path = None
     ) -> None:
         """
         Visualize segmented spine masks over the base image.
@@ -1511,7 +1511,8 @@ class RoiSegmenter:
             enum=enum,
             enumerate_fontsize=enumerate_fontsize,
             fontsize=fontsize,
-            ax=ax)
+            ax=ax,
+            output_filename=output_filename)
 
     def plot_dFF(
             self,

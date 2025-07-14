@@ -251,6 +251,6 @@ def load_imaging_data_from_tiff(
             size=dataset_instance.median_filter_kernel_size,
             mode='wrap')
 
-        data[n] = modified_frames
+        data[n] = filtered_frames
 
     return data
