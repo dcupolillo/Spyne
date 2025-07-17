@@ -5,6 +5,7 @@ from skimage.util import img_as_uint
 from scipy.ndimage import median_filter
 from spyne.core.utils.pyabf_adc import get_digital_output_list
 from spyne.core.utils.movie_utils import rows_deviation, modify_frames
+from spyne.core.utils.denoise import radius_to_kernel_size
 
 
 def load_metadata_from_tiff(
@@ -76,11 +77,12 @@ def load_metadata_from_tiff(
                     raise TypeError("Error in metadata type.")
 
                 # Call the corresponding ROIpy.Scanfields.Roi object
-                # BUG: there is sometimes uncorrespondence between
+                # NOTE: there is uncorrespondence between
                 # the metadata saved during data acquisition
                 # and generated ROIs in ROIpy. Probably due to ROIpy
                 # updating following data collection (.roi files generated
-                # at a previous time).
+                # at a previous time). This is handled by using ROIpy UUIDs
+                # instead of ScanImage UUIDs (see lines 141-142).
 
                 try:
                     roi_in_scanfield_object = (
@@ -91,10 +93,14 @@ def load_metadata_from_tiff(
 
                 z = float(roi['name'].split(",")[0].split(" = ")[-1])
 
-                # Further access nested metadata
+                objective_resolution = frame_data["SI.objectiveResolution"]
+
                 scanfield = roi['scanfields']
                 center_xy = scanfield['centerXY']
-                size_xy = scanfield['sizeXY']
+                size_xy_degree = scanfield['sizeXY']
+                size_xy_um = [
+                    size * objective_resolution
+                    for size in scanfield['sizeXY']]
                 pixel_resolution_xy = scanfield['pixelResolutionXY']
 
                 center_xy_ref = np.dot(
@@ -107,8 +113,23 @@ def load_metadata_from_tiff(
                         [0, 0, 1]])
 
                 resolution = [
-                    size_xy[0] / pixel_resolution_xy[0],
-                    size_xy[1] / pixel_resolution_xy[1]]
+                    size_xy_um[0] / pixel_resolution_xy[0],
+                    size_xy_um[1] / pixel_resolution_xy[1]]
+
+                # Calculate pixel kernel size from micrometers
+                kernel_size_um = dataset_instance.median_filter_kernel_size_um
+                spatial_radius_um = kernel_size_um[0]  # Assume square kernel
+                spatial_kernel_size = radius_to_kernel_size(
+                    spatial_radius_um,
+                    resolution,
+                    ensure_odd=True,
+                    min_size=3
+                )
+                temporal_kernel_size = int(kernel_size_um[2])
+                kernel_size_pixels = (
+                    temporal_kernel_size,
+                    spatial_kernel_size[1],  # height (y) dimension
+                    spatial_kernel_size[0])  # width (x) dimension
 
                 if z not in coplanar_dict:
                     coplanar_dict[z] = []
@@ -118,16 +139,14 @@ def load_metadata_from_tiff(
                 branch_degree = roi_in_scanfield_object.branch_degree
                 branch_id = roi_in_scanfield_object.branch_id
 
-                # NOTE: I'd rather take this info from ROIpy.Scanfields
-                # objects for correspondence reasons, as after data
-                # acquisition, ScanImage applies new UUIDs to ROIs
+                # Use ROIpy UUIDs instead of ScanImage UUIDs
+                # for better correspondence
                 roi_uuid = roi_in_scanfield_object.roi_uuid
                 roi_uuid_uint64 = roi_in_scanfield_object.roi_uuid_uint64
 
                 # Write the metadata entry
                 metadata.append({
-                    'objective resolution':
-                        frame_data["SI.objectiveResolution"],
+                    'objective resolution': objective_resolution,
                     'affine': scanfield['affine'],
                     'translate': translate,
                     'center_xy': center_xy,
@@ -138,7 +157,8 @@ def load_metadata_from_tiff(
                     'roi_uuid': roi_uuid,
                     'roi_uuid_int64': roi_uuid_uint64,
                     'rotation_degrees': scanfield['rotationDegrees'],
-                    'size_xy': scanfield['sizeXY'],
+                    'size_xy_degree': size_xy_degree,
+                    'size_xy_um': size_xy_um,
                     'resolution': resolution,
                     'z': z,
                     'z_ind': file_n,
@@ -163,8 +183,9 @@ def load_metadata_from_tiff(
                         frame_data['SI.hChannels.channelSubtractOffset'],
                     'input_range':
                         frame_data['SI.hChannels.channelInputRange'],
-                    'median_filter_kernel_size': (
-                        dataset_instance.median_filter_kernel_size),
+                    'median_filter_kernel_size_um': (
+                        dataset_instance.median_filter_kernel_size_um),
+                    'median_filter_kernel_size_px': kernel_size_pixels,
                 })
 
                 n_roi_overall += 1
@@ -187,9 +208,10 @@ def load_metadata_from_tiff(
             meta['roi_bounds'] = [start_y, end_y]
             start_y = end_y
 
-    output_metadata = [meta
-                       for group in grouped_metadata
-                       for meta in group]
+    output_metadata = [
+        meta
+        for group in grouped_metadata
+        for meta in group]
 
     return n_roi_overalls, output_metadata
 
@@ -200,6 +222,9 @@ def load_imaging_data_from_tiff(
 ) -> np.ndarray:
 
     data = [None] * len(dataset_instance.file_list)
+
+    # Create file to ROI index mapping once
+    file_to_roi_map = create_file_to_roi_map(dataset_instance)
 
     for n, file_path in enumerate(tqdm(
             dataset_instance.file_list, desc="Loading data")):
@@ -212,21 +237,34 @@ def load_imaging_data_from_tiff(
         frames = raw_frames.copy()
         # frames = img_as_uint(frames)
 
+        # Get metadata for this file using the pre-computed mapping
+        roi_index = file_to_roi_map[file_path]
+        file_metadata = dataset_instance.metadata[roi_index]
+
+        # Get active channels from metadata
+        # and convert to 0-indexed
+        active_channels = [ch - 1 for ch in file_metadata['ch_active']]
+
         # Correct gating-PMT black stripe
-        # Dectect deviating rows
-        deviation_channel1 = rows_deviation(
-            frames[:, 0, :, :], threshold_factor=threshold_factor, plot=False)
-        deviation_channel2 = rows_deviation(
-            frames[:, 1, :, :], threshold_factor=threshold_factor, plot=False)
+        # Detect deviating rows for each active channel
+        channel_deviations = {}
+        for channel_idx in active_channels:
+            channel_deviations[channel_idx] = rows_deviation(
+                frames[:, channel_idx, :, :],
+                threshold_factor=threshold_factor,
+                plot=False)
 
+        # Combine deviating rows from all active channels
         deviating_rows = {}
+        all_frames = set()
+        for channel_deviation in channel_deviations.values():
+            all_frames.update(channel_deviation.keys())
 
-        for frame in set(deviation_channel1.keys()).union(
-                set(deviation_channel2.keys())):
-
-            rows1 = deviation_channel1.get(frame, [])
-            rows2 = deviation_channel2.get(frame, [])
-            deviating_rows[frame] = sorted(set(rows1 + rows2))
+        for frame in all_frames:
+            rows_for_frame = []
+            for channel_deviation in channel_deviations.values():
+                rows_for_frame.extend(channel_deviation.get(frame, []))
+            deviating_rows[frame] = sorted(set(rows_for_frame))
 
         sorted_deviating_rows = dict(sorted(deviating_rows.items()))
 
@@ -240,17 +278,57 @@ def load_imaging_data_from_tiff(
         modified_frames = modify_frames(
             frames, consecutive_deviating_rows)
 
-        # Apply 3D median filter
+        # Use pre-calculated pixel kernel size from metadata
+        kernel_size_pixels = file_metadata['median_filter_kernel_size_px']
+
+        # Apply 3D median filter to each active channel
         filtered_frames = modified_frames.copy()
-        filtered_frames[:, 0, :, :] = median_filter(
-            filtered_frames[:, 0, :, :],
-            size=dataset_instance.median_filter_kernel_size,
-            mode='wrap')
-        filtered_frames[:, 1, :, :] = median_filter(
-            filtered_frames[:, 1, :, :],
-            size=dataset_instance.median_filter_kernel_size,
-            mode='wrap')
+        for channel_idx in active_channels:
+            filtered_frames[:, channel_idx, :, :] = median_filter(
+                filtered_frames[:, channel_idx, :, :],
+                size=kernel_size_pixels,
+                mode='wrap')
 
         data[n] = filtered_frames
 
     return data
+
+
+def create_file_to_roi_map(dataset_instance: object) -> dict:
+    """
+    Create a mapping from file paths to ROI indices.
+
+    Args:
+        dataset_instance: The dataset instance containing
+        file_list and metadata
+
+    Returns:
+        dict: Mapping from file paths to ROI indices for metadata lookup
+    """
+    # Get z-values and create index mapping
+    z_values = sorted(
+        {int(file_path.parent.name[1:])
+         for file_path in dataset_instance.file_list})
+    z_index_map = {z: idx for idx, z in enumerate(z_values)}
+
+    # Create file to ROI index mapping
+    file_to_roi_map = {}
+    for file_path in dataset_instance.file_list:
+        z_value = int(file_path.parent.name[1:])
+        z_index = z_index_map[z_value]
+
+        # Find the ROI index for this z-index
+        roi_index = None
+        for idx, meta in enumerate(dataset_instance.metadata):
+            if meta['z_ind'] == z_index:
+                roi_index = idx
+                break
+
+        if roi_index is None:
+            raise ValueError(
+                f"No metadata found for z-index {z_index}",
+                "(z-value {z_value})")
+
+        file_to_roi_map[file_path] = roi_index
+
+    return file_to_roi_map

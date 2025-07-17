@@ -26,7 +26,12 @@ class ImagingDataset:
     Files includes grouped coplanar ROIs, stacked in vertical.
     Cropping to individual ROIs is provided in the Roi class.
 
-    Depends on file organizer neuronpath.
+    Note
+    ----
+    The median filter kernel size is specified in micrometers for spatial
+    dimensions and frames for temporal dimension. Larger kernel sizes will
+    significantly increase loading time. Default (0.3, 0.3, 3) provides
+    minimal noise reduction with fast processing time.
 
     Example
     -------
@@ -34,12 +39,15 @@ class ImagingDataset:
     >>> paths = "path/to/your/folder"
     >>> dataset = spyne.ImagingDataset(paths)
     >>> print(f"Number of ROIs: {len(dataset)}")
+
+    >>> # For ultra-fast loading with minimal filtering:
+    >>> dataset = spyne.ImagingDataset(paths, kernel_size_um=(0.0, 0.0, 1))
     """
 
     def __init__(
             self,
             folder: str or Path,
-            kernel_size: tuple = (3, 3, 3)
+            kernel_size_um: tuple = (0.3, 0.3, 3)
     ) -> None:
         """
         Initialize the ImagingDataset.
@@ -48,14 +56,15 @@ class ImagingDataset:
         ----------
         paths : NeuronPath
             Path manager containing paths to imaging and associated files.
-        kernel_size : tuple, optional
-            Size of the 3D median filter applied to the imaging data.
-            Default is (3, 3, 3).
+        kernel_size_um : tuple, optional
+            Size of the 3D median filter kernel. First two values are spatial
+            dimensions in micrometers (converted to pixels), third value is
+            temporal dimension in frames. Default is (0.3, 0.3, 3).
 
         Raises
         ------
         TypeError
-            If `paths` is not a NeuronPath object or `kernel_size`
+            If `paths` is not a NeuronPath object or `kernel_size_um`
             is not a tuple.
         Exception
             If the imaging path is invalid, non-existent, or empty.
@@ -67,15 +76,14 @@ class ImagingDataset:
         if not folder.is_dir():
             raise Exception(f"{folder} must be a path to a FOLDER.")
 
-
         if not any(folder.iterdir()):
             raise Exception(f"{folder} is empty.")
 
-        if not isinstance(kernel_size, tuple):
-            raise TypeError("'kernel_size' must be a tuple.")
+        if not isinstance(kernel_size_um, tuple):
+            raise TypeError("'kernel_size_um' must be a tuple.")
 
-        if not len(kernel_size) == 3:
-            raise Exception("kernel_size must be of size 3.")
+        if not len(kernel_size_um) == 3:
+            raise Exception("kernel_size_um must be of size 3.")
 
         self.folder = folder
         self.parent_folder = folder.parent
@@ -88,7 +96,7 @@ class ImagingDataset:
             file_path for file_path in folder.rglob('*')
             if file_path.suffix.lower() == ".abf"]
 
-        self.median_filter_kernel_size = kernel_size
+        self.median_filter_kernel_size_um = kernel_size_um
 
         stack_file = next(
             (f for f in folder.parent.glob('**/*')
@@ -104,6 +112,7 @@ class ImagingDataset:
         self._sf = rp.Scanfields(self._morph)
 
         self.metadata = self._load_metadata()
+        print(len(self.metadata))
         self.data = self._load_data()
 
     def _load_metadata(self):
@@ -650,6 +659,25 @@ class Channel:
 
         return Frame(
             'std',
+            self.roi_metadata,
+            frame_data)
+
+    @property
+    def mean(self) -> object:
+        """
+        Compute the average projection of the channel.
+
+        Returns
+        -------
+        Frame
+            A `Frame` object containing the standard deviation projection
+            of the channel.
+        """
+
+        frame_data = np.mean(self.channel, axis=0)
+
+        return Frame(
+            'mean',
             self.roi_metadata,
             frame_data)
 
