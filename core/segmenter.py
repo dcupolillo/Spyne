@@ -74,8 +74,8 @@ class DatasetSegmenter:
             dataset: object,
             segmentation_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
-                r"neuralnetwork/spine_segmentation/bayesian_search/"
-                r"models/model_250414_trial18.h5"),
+                r"inference_models/deepd3/"
+                r"model_250414_trial18.h5"),
             spine_threshold: float = 0.3,
             dendrite_threshold: float = 0.7,
             mask_size: int = 3,
@@ -86,7 +86,7 @@ class DatasetSegmenter:
             kernel_size: int = 3,
             classifier_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
-                r"neuralnetwork/zscore_decoder/models/"
+                r"inference_models/zscore_classifier/"
                 r"250529_imbalanced_dataset_trial_17_model.pth"),
             # FIXME: find a better binarization strategy
             classifier_cutoff: int = 99,
@@ -143,6 +143,9 @@ class DatasetSegmenter:
 
         if not Path(segmentation_model_fn).exists():
             raise FileNotFoundError(f'{segmentation_model_fn} does not exist')
+        
+        if not Path(classifier_model_fn).exists():
+            raise FileNotFoundError(f'{classifier_model_fn} does not exist')
 
         self._dataset = dataset
         self.metadata = self._dataset.metadata

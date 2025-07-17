@@ -261,7 +261,7 @@ class Roi:
         """
         return f"({len(self.roi)}, {[n for n in self.roi[0].shape]})"
 
-    def __getitem__(self, sweep_index: int) -> SweepCA3 | SweepBLA:
+    def __getitem__(self, sweep_index: int) -> SweepCA3 or SweepBLA:
 
         if sweep_index not in self.sweep_list:
             raise IndexError(f'Sweep {sweep_index} not in {self.sweep_list}')
@@ -269,7 +269,7 @@ class Roi:
         return self.get_sweep(sweep_index)
 
     @cache
-    def get_sweep(self, sweep_index: int) -> SweepCA3 | SweepBLA:
+    def get_sweep(self, sweep_index: int) -> SweepCA3 or SweepBLA:
         """
         Retrieve a cached instance of the sweep object for the specified index.
 
@@ -280,7 +280,7 @@ class Roi:
 
         Returns
         -------
-        SweepCA3 | SweepBLA
+        SweepCA3 or SweepBLA
             A specialized sweep object, either `SweepCA3` or `SweepBLA`,
             depending on the ADC channel associated with the sweep.
         """
@@ -403,12 +403,12 @@ class Sweep:
 
         Parameters
         ----------
-        output_file : str | Path, optional
+        output_file : str or Path, optional
             Path to save the video file.
             If None, saves with the sweep's filename.
         timestamps : bool, optional
             If True, includes timestamps in the video.
-        norm : list | tuple | np.ndarray, optional
+        norm : list or tuple or np.ndarray, optional
             Normalization range for the frame intensity values.
             Default is None.
 
@@ -636,7 +636,7 @@ class Channel:
         ----------
         timestamps : bool, optional
             If True, displays elapsed time on each frame. Default is False.
-        norm : list | tuple | np.ndarray, optional
+        norm : list or tuple or np.ndarray, optional
             Normalization range for frame intensity values. Default is None.
 
         Returns
@@ -664,11 +664,11 @@ class Channel:
 
         Parameters
         ----------
-        output_file : str | Path
+        output_file : str or Path
             Path to save the video file.
         timestamps : bool, optional
             If True, includes elapsed time on the frames. Default is False.
-        norm : list | tuple | np.ndarray, optional
+        norm : list or tuple or np.ndarray, optional
             Normalization range for frame intensity values. Default is None.
 
         Returns
@@ -805,7 +805,7 @@ class Frame:
             Axes to plot on. If None, a new figure and axes are created.
         cmap : str, optional
             Colormap for the image. Default is None.
-        norm : tuple | list | np.ndarray, optional
+        norm : tuple or list or np.ndarray, optional
             Normalization range as [min, max]. Default is None.
         show_cmap_bar : bool, optional
             If True, display a colorbar alongside the image. Default is False.
@@ -848,11 +848,11 @@ class Frame:
 
         Parameters
         ----------
-        output_file : str | Path, optional
+        output_file : str or Path, optional
             Path to save the frame. If None, saves with the frame's default filename.
         data_type : str, optional
             Data type to save the frame as. Default is None (uses original data type).
-        norm : tuple | list | np.ndarray, optional
+        norm : tuple or list or np.ndarray, optional
             Normalization range as [min, max]. Default is None.
 
         Returns
