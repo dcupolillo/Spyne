@@ -1,6 +1,8 @@
 """ Created on Fri Mar  1 16:20:12 2024
     @author: dcupolillo """
 
+from __future__ import annotations
+
 from pathlib import Path
 import numpy as np
 import tensorflow as tf
@@ -404,7 +406,7 @@ class DatasetSegmenter:
         return calcium_events_BLA, calcium_events_CA3
 
     @cache
-    def _get_roi(self, roi_index: int) -> object:
+    def _get_roi(self, roi_index: int) -> RoiSegmenter:
         """
         Retrieve a specific ROI's segmentation and associated data.
 
@@ -476,7 +478,7 @@ class DatasetSegmenter:
             selected_calcium_events_binary_BLA,
             selected_calcium_events_binary_CA3)
 
-    def __getitem__(self, roi_index: int) -> None:
+    def __getitem__(self, roi_index: int) -> RoiSegmenter:
         if roi_index not in self._dataset.roi_list:
             raise IndexError(
                 f'Roi {roi_index} out of range {len(self._dataset.roi_list)}')
@@ -492,7 +494,7 @@ class DatasetSegmenter:
         self._current_index = 0
         return self
 
-    def __next__(self):
+    def __next__(self) -> RoiSegmenter:
         if self._current_index < len(self._dataset):
             roi_segmenter = RoiSegmenter(self._dataset, self._current_index)
             self._current_index += 1
@@ -500,7 +502,7 @@ class DatasetSegmenter:
         else:
             raise StopIteration
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._dataset)
 
     def spines_by_branch(
@@ -1589,7 +1591,7 @@ class RoiSegmenter:
             fontsize=fontsize)
 
     @cache
-    def _get_spine(self, spine_index: int) -> object:
+    def _get_spine(self, spine_index: int) -> Spine:
         """
         Retrieve a specific spine's data.
 
@@ -1640,7 +1642,7 @@ class RoiSegmenter:
             selected_zscore_BLA,
             selected_ts_BLA,)
 
-    def __getitem__(self, spine_index) -> None:
+    def __getitem__(self, spine_index) -> Spine:
         if self.spines_data is None:
             raise KeyError("Run inference() first.")
         return self._get_spine(spine_index)

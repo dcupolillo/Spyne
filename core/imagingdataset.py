@@ -1,5 +1,6 @@
 """ Created on Mon Oct 30 13:59:21 2023
     @author: dcupolillo """
+from __future__ import annotations
 
 from pathlib import Path
 import numpy as np
@@ -112,7 +113,6 @@ class ImagingDataset:
         self._sf = rp.Scanfields(self._morph)
 
         self.metadata = self._load_metadata()
-        print(len(self.metadata))
         self.data = self._load_data()
 
     def _load_metadata(self):
@@ -161,7 +161,7 @@ class ImagingDataset:
     def __setattr__(self, name: str, value):
         self.__dict__[f"_{name}"] = value
 
-    def __getitem__(self, roi_index: int) -> None:
+    def __getitem__(self, roi_index: int) -> Roi:
         if roi_index not in self.roi_list:
             raise IndexError(
                 f'Roi {roi_index} out of range {len(self.roi_list)}')
@@ -169,7 +169,7 @@ class ImagingDataset:
         return self.get_roi(roi_index)
 
     @cache
-    def get_roi(self, roi_index: int) -> object:
+    def get_roi(self, roi_index: int) -> Roi:
         """
         Retrieve a cached instance of the specified ROI.
 
@@ -261,7 +261,7 @@ class Roi:
         """
         return f"({len(self.roi)}, {[n for n in self.roi[0].shape]})"
 
-    def __getitem__(self, sweep_index: int) -> object:
+    def __getitem__(self, sweep_index: int) -> SweepCA3 | SweepBLA:
 
         if sweep_index not in self.sweep_list:
             raise IndexError(f'Sweep {sweep_index} not in {self.sweep_list}')
@@ -269,7 +269,7 @@ class Roi:
         return self.get_sweep(sweep_index)
 
     @cache
-    def get_sweep(self, sweep_index: int) -> object:
+    def get_sweep(self, sweep_index: int) -> SweepCA3 | SweepBLA:
         """
         Retrieve a cached instance of the sweep object for the specified index.
 
@@ -280,7 +280,7 @@ class Roi:
 
         Returns
         -------
-        SweepCA3 or SweepBLA
+        SweepCA3 | SweepBLA
             A specialized sweep object, either `SweepCA3` or `SweepBLA`,
             depending on the ADC channel associated with the sweep.
         """
@@ -430,18 +430,36 @@ class Sweep:
             timestamps=timestamps,
             norm=norm)
 
-    @property
-    def ch1(self) -> object:
+    @cache
+    def get_channel(self, channel_index: int) -> Channel:
         """
-        Access the data for channel 1 of the sweep.
+        Access the data for a specific channel of the sweep.
+
+        Parameters
+        ----------
+        channel_index : int
+            Index of the channel to retrieve (0-based, based on saved channels).
 
         Returns
         -------
         Channel
-            A `Channel` object containing the data and metadata for channel 1.
-        """
+            A `Channel` object containing the data and metadata for the 
+            specified channel.
 
-        channel_index = 0
+        Raises
+        ------
+        IndexError
+            If channel_index is out of range for saved channels.
+        """
+        ch_active = self.roi_metadata['ch_active']
+        n_saved_channels = len(ch_active)
+        
+        if channel_index >= n_saved_channels:
+            raise IndexError(
+                f"Channel {channel_index} out of range. "
+                f"Available saved channels: 0-{n_saved_channels-1} "
+                f"(corresponding to hardware channels {ch_active})")
+        
         channel_data = self.sweep[:, channel_index, :, :]
 
         return Channel(
@@ -449,24 +467,70 @@ class Sweep:
             self.roi_metadata,
             channel_data)
 
-    @property
-    def ch2(self) -> object:
+    def __getitem__(self, channel_index: int) -> Channel:
         """
-        Access the data for channel 2 of the sweep.
+        Enable indexing syntax for channel access.
+        
+        Parameters
+        ----------
+        channel_index : int
+            Index of the channel to retrieve (0-based, based on saved channels).
+            
+        Returns
+        -------
+        Channel
+            A `Channel` object for the specified channel.
+        """
+        return self.get_channel(channel_index)
+
+    @property
+    def channels(self) -> dict:
+        """
+        Get information about available channels.
+
+        Returns
+        -------
+        dict
+            Dictionary with channel information including:
+            - 'active': list of hardware channel numbers that were active (1-based)
+            - 'saved': number of channels actually saved in the data
+            - 'mapping': mapping from saved index (0-based) to hardware channel number (1-based)
+        """
+        ch_active = self.roi_metadata['ch_active']
+        return {
+            'active': ch_active,
+            'saved': len(ch_active),
+            'mapping': {i: ch for i, ch in enumerate(ch_active)}
+        }
+
+    @property
+    def ch1(self) -> Channel:
+        """
+        Access first saved channel data (convenience property for backward compatibility).
 
         Returns
         -------
         Channel
-            A `Channel` object containing the data and metadata for channel 2.
+            A `Channel` object containing the data and metadata for the first saved channel.
         """
+        return self.get_channel(0)
 
-        channel_index = 1
-        channel_data = self.sweep[:, channel_index, :, :]
+    @property
+    def ch2(self) -> Channel:
+        """
+        Access second saved channel data (convenience property for backward compatibility).
 
-        return Channel(
-            channel_index,
-            self.roi_metadata,
-            channel_data)
+        Returns
+        -------
+        Channel
+            A `Channel` object containing the data and metadata for the second saved channel.
+            
+        Raises
+        ------
+        IndexError
+            If only one channel was saved.
+        """
+        return self.get_channel(1)
 
 
 class SweepCA3(Sweep):
@@ -536,7 +600,7 @@ class Channel:
     def __getitem__(
             self,
             frame_index: int
-    ) -> object:
+    ) -> Frame:
         """
         When indexed, returns a single Frame.
         """
@@ -626,7 +690,7 @@ class Channel:
             norm=norm)
 
     @property
-    def maxproj(self) -> object:
+    def maxproj(self) -> Frame:
         """
         Compute the maximum intensity projection of the channel.
 
@@ -644,7 +708,7 @@ class Channel:
             frame_data)
 
     @property
-    def std(self) -> object:
+    def std(self) -> Frame:
         """
         Compute the standard deviation projection of the channel.
 
@@ -663,7 +727,7 @@ class Channel:
             frame_data)
 
     @property
-    def mean(self) -> object:
+    def mean(self) -> Frame:
         """
         Compute the average projection of the channel.
 

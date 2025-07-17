@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from tqdm import tqdm
 import tifffile
 import numpy as np
@@ -7,10 +9,96 @@ from spyne.core.utils.pyabf_adc import get_digital_output_list
 from spyne.core.utils.movie_utils import rows_deviation, modify_frames
 from spyne.core.utils.denoise import radius_to_kernel_size
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from spyne.core.imagingdataset import ImagingDataset
+
+
+def create_file_to_roi_map(dataset_instance: ImagingDataset) -> dict:
+    """
+    Create a mapping from file paths to ROI indices.
+
+    Parameters
+    ----------
+    dataset_instance : ImagingDataset
+        The dataset instance containing file_list and metadata.
+
+    Returns
+    -------
+    dict
+        Mapping from file paths to ROI indices for metadata lookup.
+    """
+    # Get z-values and create index mapping
+    z_values = sorted(
+        {int(file_path.parent.name[1:])
+         for file_path in dataset_instance.file_list})
+    z_index_map = {z: idx for idx, z in enumerate(z_values)}
+
+    # Create file to ROI index mapping
+    file_to_roi_map = {}
+    for file_path in dataset_instance.file_list:
+        z_value = int(file_path.parent.name[1:])
+        z_index = z_index_map[z_value]
+
+        # Find the ROI index for this z-index
+        roi_index = None
+        for idx, meta in enumerate(dataset_instance.metadata):
+            if meta['z_ind'] == z_index:
+                roi_index = idx
+                break
+
+        if roi_index is None:
+            raise ValueError(
+                f"No metadata found for z-index {z_index}",
+                "(z-value {z_value})")
+
+        file_to_roi_map[file_path] = roi_index
+
+    return file_to_roi_map
+
 
 def load_metadata_from_tiff(
-        dataset_instance: object,
+        dataset_instance: ImagingDataset,
 ) -> tuple:
+    """
+    Extract and organize metadata from ScanImage TIFF files.
+
+    This function processes TIFF files from ScanImage microscopy data,
+    extracting comprehensive metadata including ROI information,
+    scanning parameters, and coordinate transformations. It integrates
+    with ROIpy scanfield objects to provide morphological annotations
+    and handles coordinate system transformations between ScanImage
+    and reference frames.
+
+    Parameters
+    ----------
+    dataset_instance : ImagingDataset
+        Dataset instance containing file_list, abf_file_list, 
+        _sf (scanfield), and median_filter_kernel_size_um attributes.
+
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - n_roi_overalls (int): Total number of ROIs across all files
+        - output_metadata (list[dict]): List of metadata dictionaries,
+          each containing:
+            - Coordinate transforms (affine, translate, pixel_to_ref)
+            - ROI geometry (center_xy, size_xy_um, pixel_resolution_xy)
+            - Scanning parameters (frame_rate, flyto, flyback)
+            - Channel configuration (ch_active, LUT, offset)
+            - ROIpy integration (roi_uuid, branch_degree, branch_id)
+            - Filter parameters (median_filter_kernel_size_px)
+            - Temporal info (n_frames, n_sweeps, rectangle_period)
+            - Z-plane organization (z, z_ind, coplanar_roi_n, roi_bounds)
+
+    Notes
+    -----
+    - Uses ROIpy UUIDs instead of ScanImage UUIDs for better correspondence
+    - Converts spatial filter kernel sizes from micrometers to pixels
+    - Organizes ROIs by z-plane and assigns vertical bounds for stacking
+    - Handles both single ROI (dict) and multiple ROI (list) configurations
+    """
 
     metadata = []
 
@@ -217,9 +305,43 @@ def load_metadata_from_tiff(
 
 
 def load_imaging_data_from_tiff(
-        dataset_instance: object,
+        dataset_instance: ImagingDataset,
         threshold_factor: int = 3,
 ) -> np.ndarray:
+    """
+    Load and preprocess calcium imaging data from ScanImage TIFF files.
+
+    This function loads raw imaging data, corrects PMT gating artifacts
+    (black stripes), and applies 3D median filtering for noise reduction.
+    It processes each active channel independently and uses pre-calculated
+    filter parameters from metadata for optimal performance.
+
+    Parameters
+    ----------
+    dataset_instance : ImagingDataset
+        Dataset instance containing file_list, metadata, and 
+        median_filter_kernel_size_um attributes.
+    threshold_factor : int, optional
+        Multiplicative factor for PMT artifact detection threshold. 
+        Higher values are more conservative in detecting artifacts. 
+        Default is 3.
+
+    Returns
+    -------
+    np.ndarray
+        List of processed 4D arrays, one per file, with shape
+        (n_frames, n_channels, height, width). Each array contains
+        filtered calcium imaging data with PMT artifacts corrected.
+
+    Notes
+    -----
+    - Raw data expected as signed int16 from ScanImage
+    - PMT black stripe correction applied per active channel
+    - 3D median filtering with kernel size from metadata
+    - Active channels converted from 1-indexed to 0-indexed
+    - Filter kernel dimensions: (temporal, height, width)
+    - Uses 'wrap' mode for boundary handling in median filter
+    """
 
     data = [None] * len(dataset_instance.file_list)
 
@@ -294,41 +416,4 @@ def load_imaging_data_from_tiff(
     return data
 
 
-def create_file_to_roi_map(dataset_instance: object) -> dict:
-    """
-    Create a mapping from file paths to ROI indices.
 
-    Args:
-        dataset_instance: The dataset instance containing
-        file_list and metadata
-
-    Returns:
-        dict: Mapping from file paths to ROI indices for metadata lookup
-    """
-    # Get z-values and create index mapping
-    z_values = sorted(
-        {int(file_path.parent.name[1:])
-         for file_path in dataset_instance.file_list})
-    z_index_map = {z: idx for idx, z in enumerate(z_values)}
-
-    # Create file to ROI index mapping
-    file_to_roi_map = {}
-    for file_path in dataset_instance.file_list:
-        z_value = int(file_path.parent.name[1:])
-        z_index = z_index_map[z_value]
-
-        # Find the ROI index for this z-index
-        roi_index = None
-        for idx, meta in enumerate(dataset_instance.metadata):
-            if meta['z_ind'] == z_index:
-                roi_index = idx
-                break
-
-        if roi_index is None:
-            raise ValueError(
-                f"No metadata found for z-index {z_index}",
-                "(z-value {z_value})")
-
-        file_to_roi_map[file_path] = roi_index
-
-    return file_to_roi_map
