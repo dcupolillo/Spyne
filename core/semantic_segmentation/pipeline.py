@@ -54,13 +54,13 @@ def run_inference_and_post_processing(
     Returns
     -------
     tuple
-        Processed predictions for spines and dendrites.
+        Processed predictions for spines and dendrites, and raw predictions.
     """
 
     with tqdm(total=2, desc="Inference Progress", leave=True) as pbar:
 
         # Step 1: Perform inference
-        spine_predictions, dendrite_predictions = inference(
+        raw_predictions = inference(
             images=images,
             model_fn=config['segmentation_model_fn'],
             original_dimensions=original_dimensions,
@@ -77,14 +77,13 @@ def run_inference_and_post_processing(
         )
         pbar.update(1)
 
-    return processed_predictions
+    return processed_predictions, raw_predictions
 
 
 def semantic_segmentation_pipeline(
         dataset,
         segmenter,
         config: dict,
-        output_folder: str or Path
 ) -> tuple:
     """
     Perform semantic segmentation pipeline for a dataset.
@@ -98,8 +97,6 @@ def semantic_segmentation_pipeline(
         The dataset containing ROIs for segmentation.
     segmenter : object
         The RoiSegmenter object to process each ROI.
-    device : str
-        The device to run the computation on (e.g., '/GPU:0' or '/CPU:0').
     config : dict
         Configuration dictionary containing parameters for segmentation and inference.
 
@@ -131,13 +128,18 @@ def semantic_segmentation_pipeline(
     -------
     tuple
         A tuple containing:
+        - segmenters : list
+            List of RoiSegmenter instances.
         - spines_data : list
             Processed spine data for all ROIs.
         - dendrites_data : list
             Processed dendrite data for all ROIs.
+        - spine_predictions : list
+            Raw neural network predictions for spine segmentation.
+        - dendrite_predictions : list
+            Raw neural network predictions for dendrite segmentation.
     """
 
-    output_folder = Path(output_folder)
     images = [None] * len(dataset)
     segmenters = [None] * len(dataset)
 
@@ -158,12 +160,15 @@ def semantic_segmentation_pipeline(
     padded_images = np.stack(padded_images, axis=0)
 
     # Step 3: Run the segmentation pipeline
-    spines_data, dendrites_data = run_inference_and_post_processing(
+    processed_predictions, raw_predictions = run_inference_and_post_processing(
         padded_images,
         segmenters,
         original_dimensions,
         config
     )
+    
+    spines_data, dendrites_data = processed_predictions
+    spine_predictions, dendrite_predictions = raw_predictions
 
     # Flatten spines and dendrites data
     spines_data = list(chain.from_iterable(spines_data))
@@ -173,7 +178,4 @@ def semantic_segmentation_pipeline(
     for i, spine_dict in enumerate(spines_data):
         spine_dict['spine_index'] = i
 
-    # Save data
-    fl.save(Path(output_folder, "spines_data.h5"), spines_data)
-
-    return segmenters, spines_data, dendrites_data
+    return segmenters, spines_data, dendrites_data, spine_predictions, dendrite_predictions

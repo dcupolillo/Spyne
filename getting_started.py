@@ -31,11 +31,13 @@ channel_red.show()
 single_frame_green = channel_green[0]
 single_frame_green.show(cmap='binary')
 
-# Work on single roi
-segmented_roi = segmenter[0]
-segmented_roi.inference()
+# To launch an analysis on a complete neuron dataset
+segmenter.collect_all_data()
 
-# Display inference result and analisys
+# Work on single roi after data collection
+segmented_roi = segmenter[0]
+
+# Display analysis results
 segmented_roi.plot_masks()
 segmented_roi.plot_dFF()
 segmented_roi.plot_zscore()

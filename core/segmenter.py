@@ -27,14 +27,10 @@ from spyne.display.plot_segmenter import (
     spine_sholl)
 from spyne.core.semantic_segmentation.pipeline import (
     semantic_segmentation_pipeline)
-from spyne.core.semantic_segmentation.padding import pad_image
-from spyne.core.semantic_segmentation.inference import inference
-from spyne.core.semantic_segmentation.post_processing import (
-    process_predictions)
+
 from spyne.core.timeseries.timeseries_pipeline import collect_timeseries
 from spyne.core.timeseries.inference import (
-    detect_calcium_events,
-    binarize_calcium_events_array)
+    detect_calcium_events, binarize_calcium_event_probabilities)
 from spyne.core.timeseries.calculate_timeseries import (
     dFF,
     get_time_series,
@@ -165,7 +161,7 @@ class DatasetSegmenter:
         self.classifier_model_fn = classifier_model_fn
         self.classifier_cutoff = classifier_cutoff
 
-        self.load_data()
+        self._load_data()
 
     @property
     def params(self) -> dict:
@@ -184,7 +180,7 @@ class DatasetSegmenter:
             'classifier_cutoff': self.classifier_cutoff,
         }
 
-    def load_data(self) -> None:
+    def _load_data(self) -> None:
         """
         Load precomputed data (if available) for faster analysis.
 
@@ -212,6 +208,10 @@ class DatasetSegmenter:
             Calcium event probability for BLA spines.
         calcium_events_CA3 : list
             Calcium event probability for CA3 spines.
+        spine_predictions : list
+            Raw neural network predictions for spine segmentation.
+        dendrite_predictions : list
+            Raw neural network predictions for dendrite segmentation.
 
         Raises
         ------
@@ -221,17 +221,19 @@ class DatasetSegmenter:
         path = self._dataset.folder.parent
 
         files = {
+            'spines_data': 'spines_data.h5',
+            'spine_predictions': 'spine_predictions.h5',
+            'dendrite_predictions': 'dendrite_predictions.h5',
             'zscores_CA3': 'zscores_CA3.h5',
             'dFF_CA3': 'dFF_CA3.h5',
             'ts_CA3': 'ts_CA3.h5',
             'zscores_BLA': 'zscores_BLA.h5',
             'dFF_BLA': 'dFF_BLA.h5',
             'ts_BLA': 'ts_BLA.h5',
-            'spines_data': 'spines_data.h5',
             'calcium_events_BLA': 'calcium_events_BLA.h5',
             'calcium_events_CA3': 'calcium_events_CA3.h5',
             'calcium_events_binary_BLA': 'calcium_events_binary_BLA.h5',
-            'calcium_events_binary_CA3': 'calcium_events_binary_CA3.h5'
+            'calcium_events_binary_CA3': 'calcium_events_binary_CA3.h5', 
         }
 
         existing_files = {
@@ -266,8 +268,66 @@ class DatasetSegmenter:
         self.n_spines_CA3 = sum(
             1 for spine in self.calcium_events_binary_CA3
             if sum(spine) > 0)
-
+        
     def collect_all_data(
+            self,
+            save: bool = True,
+            save_path: str or Path = None) -> None:
+        """
+        Collect and process spine and dendrite segmentation data
+        and collects within-spine time series
+        for the entire dataset.
+        This method performs the following steps:
+        1. Runs the semantic segmentation pipeline for all ROIs,
+           storing the results in `spines_data` and `dendrites_data`.
+        2. Associates segmented spines with their corresponding ROI
+           segmenters for indexing.
+        3. Collects timeseries data (z-scores, dF/F, timestamps)
+        for all segmented spines.
+        Parameters
+        ----------
+        save : bool
+            Set to True to save data in `.h5` format. Default is True.
+        save_path : str or Path, optional
+            Directory where the `.h5` files will be saved.
+            If None, uses the dataset's parent folder.
+        Attributes Updated
+        ------------------
+        spines_data : list
+            Processed spine data for all ROIs.
+        dendrites_data : list
+            Processed dendrite data for all ROIs.
+        spine_predictions : list
+            Raw neural network predictions for spine segmentation.
+        dendrite_predictions : list
+            Raw neural network predictions for dendrite segmentation.
+        Notes   
+        -----
+        - Spine and dendrite segmentation is performed using a deep learning
+          model configured in `self.params`.
+        - Timeseries data collection extracts relevant information
+            (e.g., z-scores, dF/F) for all spines detected during segmentation.
+            """
+        output_folder = (
+            self._dataset.folder.parent if save_path is None else save_path)
+        
+        segmenters = self._collect_spines_and_dendrites_data(
+            save=save,
+            save_path=output_folder
+        )
+
+        self._collect_timeseries(
+            segmenters=segmenters,
+            save=save,
+            save_path=output_folder
+        )
+
+        self._calcium_events_predictions(
+            save=save,
+            save_path=output_folder
+        )
+
+    def _collect_spines_and_dendrites_data(
             self,
             save: bool = True,
             save_path: str or Path = None,
@@ -322,13 +382,13 @@ class DatasetSegmenter:
         (
             segmenters,
             self.spines_data,
-            self.dendrites_data
+            self.dendrites_data,
+            self.spine_predictions,
+            self.dendrite_predictions
         ) = semantic_segmentation_pipeline(
             dataset=self._dataset,
             segmenter=self,
-            config=self.params,
-            save=save,
-            output_folder=saving_folder
+            config=self.params
         )
 
         self.n_spines = len(self.spines_data)
@@ -348,6 +408,39 @@ class DatasetSegmenter:
                 spine_counter:spine_counter + n_spines_per_roi]
             spine_counter += n_spines_per_roi
 
+        if save:
+            data_to_save = {
+                "spines_data.h5": getattr(self, 'spines_data', []),
+                "dendrites_data.h5": getattr(self, 'dendrites_data', []),
+                "spine_predictions.h5": getattr(self, 'spine_predictions', []),
+                "dendrite_predictions.h5": getattr(self, 'dendrite_predictions', [])
+            }
+
+            for filename, data in data_to_save.items():
+                self._save_to_h5(data, saving_folder, filename)
+        
+        return segmenters
+    
+    def _collect_timeseries(
+            self,
+            segmenters: list,
+            save: bool = True,
+            save_path: str or Path = None) -> None:
+        """
+        Collect timeseries data (z-scores, dF/F, timestamps) for all spines.
+        This method processes the segmented spines to extract relevant
+        information, including z-scores, dF/F values, and timestamps.
+        Parameters
+        ----------
+        save : bool
+            Set to True to save data in .h5 format. Default is True.
+        save_path : str or Path, optional
+            Directory where the .h5 files will be saved.
+            If None, uses the dataset's parent folder.
+        """
+        saving_folder = (
+            self._dataset.folder.parent if save_path is None else save_path)
+        
         (
             self.zscores_CA3,
             self.dFF_CA3,
@@ -360,53 +453,163 @@ class DatasetSegmenter:
             self.spines_data,
             self.device,
             self._dataset.folder.parent)
+        
+        if save:
+            data_to_save = {
+                "zscores_CA3.h5": getattr(self, 'zscores_CA3', []),
+                "dFF_CA3.h5": getattr(self, 'dFF_CA3', []),
+                "ts_CA3.h5": getattr(self, 'ts_CA3', []),
+                "zscores_BLA.h5": getattr(self, 'zscores_BLA', []),
+                "dFF_BLA.h5": getattr(self, 'dFF_BLA', []),
+                "ts_BLA.h5": getattr(self, 'ts_BLA', [])
+            }
+            
+            for filename, data in data_to_save.items():
+                self._save_to_h5(data, saving_folder, filename)
 
-    def calcium_events_prediction(
+    def _calcium_events_predictions(
             self,
             save: bool = True,
-            save_path: str or Path = None,
+            save_path: str or Path = None
     ) -> None:
+        """
+        Detect calcium events in spines using a trained neural network classifier.
+
+        This method processes the z-scored traces for BLA and CA3 spines to
+        detect calcium events using a pre-trained neural network classifier.
+        The results are stored as probabilities and binarized using the
+        configured threshold parameters.
+
+        Parameters
+        ----------
+        save : bool, optional
+            Whether to save the calcium event data to .h5 files.
+            Default is True.
+        save_path : str or Path, optional
+            Directory where the .h5 files will be saved.
+            If None, uses the dataset's parent folder.
+
+        Attributes Updated
+        ------------------
+        calcium_event_probabilities_BLA : list
+            Raw calcium event probabilities for BLA spines.
+        calcium_event_probabilities_CA3 : list
+            Raw calcium event probabilities for CA3 spines.
+        calcium_event_binary_BLA : np.ndarray
+            Binarized calcium events for BLA spines.
+        calcium_event_binary_CA3 : np.ndarray
+            Binarized calcium events for CA3 spines.
+        n_spines_BLA : int
+            Number of active BLA spines (with at least one calcium event).
+        n_spines_CA3 : int
+            Number of active CA3 spines (with at least one calcium event).
+
+        Notes
+        -----
+        - This method requires that timeseries data has been collected first
+          (i.e., `_collect_timeseries()` should be run before this method).
+        - The method uses the zscore_classifier to predict calcium events
+          from z-scored traces.
+        - Binarization is performed using the `binarize_calcium_event_probabilities`
+          function with parameters from the configuration.
+        - This method is typically called automatically by `collect_all_data()`.
+
+        Raises
+        ------
+        ValueError
+            If z-scored data is not available (run `collect_all_data()` first).
+        """
+        if not hasattr(self, 'zscores_BLA') or not self.zscores_BLA:
+            raise ValueError(
+                "Z-scored data not available. "
+                "Run collect_all_data() first."
+            )
 
         saving_folder = (
             self._dataset.folder.parent if save_path is None else save_path)
 
-        (
-            calcium_events_BLA,
-            calcium_events_CA3
-        ) = detect_calcium_events(
-            self.params,
-            self.zscores_BLA,
-            self.zscores_CA3,
-            save=save,
-            output_folder=saving_folder
+        self.calcium_event_probabilities_BLA = detect_calcium_events(
+                config=self.params,
+                zscores=self.zscores_BLA
+            )
+        
+        self.calcium_event_probabilities_CA3 = detect_calcium_events(
+                config=self.params,
+                zscores=self.zscores_CA3
+            )
+        
+        self.calcium_event_binary_BLA = binarize_calcium_event_probabilities(
+            config=self.params,
+            calcium_event_probabilities=self.calcium_events_BLA,
         )
 
-        self.calcium_events_BLA = calcium_events_BLA
-        self.calcium_events_CA3 = calcium_events_CA3
+        self.calcium_event_binary_CA3 = binarize_calcium_event_probabilities(
+            config=self.params,
+            calcium_event_probabilities=self.calcium_events_CA3,
+        )
 
-        # TODO improve classification threshold
-        # (
-        #     self.dynamic_threshold_BLA,
-        #     self.calcium_events_binary_BLA,
-        #     self.dynamic_threshold_CA3,
-        #     self.calcium_events_binary_CA3
-        # ) = binarize_calcium_events_array(
-        #     self.calcium_events_BLA,
-        #     self.calcium_events_CA3,
-        #     self.params['classifier_cutoff'],
-        #     save=save,
-        #     output_folder=saving_folder
-        # )
+        # Update spine counts
+        self.n_spines_BLA = sum(
+            1 for spine in self.calcium_events_binary_BLA
+            if sum(spine) > 0)
 
-        # self.n_spines_BLA = sum(
-        #     1 for spine in self.calcium_events_binary_BLA
-        #     if sum(spine) > 0)
+        self.n_spines_CA3 = sum(
+            1 for spine in self.calcium_events_binary_CA3
+            if sum(spine) > 0)
 
-        # self.n_spines_CA3 = sum(
-        #     1 for spine in self.calcium_events_binary_CA3
-        #     if sum(spine) > 0)
+        if save:
 
-        return calcium_events_BLA, calcium_events_CA3
+            calcium_events_to_save = {
+                "calcium_event_probabilities_BLA.h5":
+                    getattr(self, 'calcium_event_probabilities_BLA', []),
+                "calcium_event_probabilities_CA3.h5":
+                    getattr(self, 'calcium_event_probabilities_CA3', []),
+                "calcium_event_binary_BLA.h5":
+                    getattr(self, 'calcium_event_binary_BLA', []),
+                "calcium_event_binary_CA3.h5":
+                    getattr(self, 'calcium_event_binary_CA3', [])
+            }
+            
+            for filename, data in calcium_events_to_save.items():
+                self._save_to_h5(data, saving_folder, filename)
+
+    def _save_to_h5(
+            self,
+            data,
+            output_folder: str or Path,
+            filename: str
+    ) -> None:
+        """
+        Generic function to save data to an .h5 file.
+
+        Parameters
+        ----------
+        data : any
+            Data to save. Only saves if data exists and is not empty.
+        output_folder : str or Path
+            Directory where the .h5 file will be saved.
+        filename : str
+            Name of the .h5 file to save.
+        """
+        if not isinstance(output_folder, Path):
+            output_folder = Path(output_folder)
+        
+        if not output_folder.exists():
+            raise FileNotFoundError(
+                f"Output folder {output_folder} does not exist.")
+        
+        if not output_folder.is_dir():
+            raise NotADirectoryError(
+                f"Output path {output_folder} is not a directory.")
+        
+        if not filename.endswith('.h5'):
+            raise ValueError(
+                f"Filename {filename} must end with '.h5'.")
+
+        if data:
+            output_folder = Path(output_folder)
+            fl.save(output_folder / filename, data)
+            print(f"Saved {filename} to {output_folder}")
 
     @cache
     def _get_roi(self, roi_index: int) -> RoiSegmenter:
@@ -464,6 +667,10 @@ class DatasetSegmenter:
         selected_spines_data = [
             self.spines_data[i] for i in spine_indices]
 
+        # Get stored predictions for this ROI
+        spine_predictions = self.spine_predictions[roi_index] if roi_index < len(self.spine_predictions) else None
+        dendrite_predictions = self.dendrite_predictions[roi_index] if roi_index < len(self.dendrite_predictions) else None
+
         return RoiSegmenter(
             roi_index,
             roi_metadata,
@@ -479,7 +686,9 @@ class DatasetSegmenter:
             selected_calcium_events_BLA,
             selected_calcium_events_CA3,
             selected_calcium_events_binary_BLA,
-            selected_calcium_events_binary_CA3)
+            selected_calcium_events_binary_CA3,
+            spine_predictions,
+            dendrite_predictions)
 
     def __getitem__(self, roi_index: int) -> RoiSegmenter:
         if roi_index not in self._dataset.roi_list:
@@ -1241,7 +1450,6 @@ class RoiSegmenter:
     for a specific ROI.
 
     This class provides methods for:
-    - Performing inference to segment spines and dendrites.
     - Accessing and iterating over segmented spines.
     - Visualizing segmentation results, dF/F traces, and z-scores.
 
@@ -1253,10 +1461,12 @@ class RoiSegmenter:
     >>> dataset = spyne.ImagingDataset(paths)
     >>> segmenter = spyne.DatasetSegmenter(dataset)
 
-    >>> # Initialize a RoiSegmenter
+    >>> # Run segmentation and analyze the dataset
+    >>> segmenter.collect_all_data()
+
+    >>> # Access a specific ROI
     >>> segmented_roi = segmenter[0]
-    >>> # Display inference result and analisys
-    >>> segmented_roi.inference()
+    >>> # Display analysis results
     >>> segmented_roi.plot_masks()
     >>> segmented_roi.plot_dFF()
     >>> segmented_roi.plot_zscore()
@@ -1278,74 +1488,76 @@ class RoiSegmenter:
             calcium_events_BLA: list,
             calcium_events_CA3: list,
             calcium_events_binary_BLA: list,
-            calcium_events_binary_CA3: list
+            calcium_events_binary_CA3: list,
+            spine_predictions: np.ndarray,
+            dendrite_predictions: np.ndarray
     ) -> None:
         """
-    Initialize the RoiSegmenter instance for a specific ROI.
+        Initialize the RoiSegmenter instance for a specific ROI.
 
-    Parameters
-    ----------
-    roi_index : int
-        Index of the region of interest (ROI) within the dataset.
-    roi_metadata : dict
-        Metadata for the ROI, including information about spatial properties,
-        imaging parameters, and number of sweeps.
-    roi_data : np.ndarray
-        Raw ROI data containing imaging or fluorescence frames.
-    params : dict
-        Configuration parameters for segmentation, including thresholds and
-        processing settings.
-    dFF_CA3 : list
-        dF/F traces for spines in the CA3 region.
-    zscore_CA3 : list
-        Z-scores for spines in the CA3 region.
-    ts_CA3 : list
-        Time series data for spines in the CA3 region.
-    dFF_BLA : list
-        dF/F traces for spines in the BLA region.
-    zscore_BLA : list
-        Z-scores for spines in the BLA region.
-    ts_BLA : list
-        Time series data for spines in the BLA region.
-    spines_data : list
-        Processed spine data from semantic segmentation.
-    calcium_events_BLA : list
-        Calcium event probabilities for spines in the BLA region.
-    calcium_events_CA3 : list
-        Calcium event probabilities for spines in the CA3 region.
-    calcium_events_binary_BLA : list
-        Binarized calcium event probabilities for BLA spines.
-    calcium_events_binary_CA3 : list
-        Binarized calcium event probabilities for CA3 spines.
+        Parameters
+        ----------
+        roi_index : int
+            Index of the region of interest (ROI) within the dataset.
+        roi_metadata : dict
+            Metadata for the ROI, including information about spatial properties,
+            imaging parameters, and number of sweeps.
+        roi_data : np.ndarray
+            Raw ROI data containing imaging or fluorescence frames.
+        params : dict
+            Configuration parameters for segmentation, including thresholds and
+            processing settings.
+        dFF_CA3 : list
+            dF/F traces for spines in the CA3 region.
+        zscore_CA3 : list
+            Z-scores for spines in the CA3 region.
+        ts_CA3 : list
+            Time series data for spines in the CA3 region.
+        dFF_BLA : list
+            dF/F traces for spines in the BLA region.
+        zscore_BLA : list
+            Z-scores for spines in the BLA region.
+        ts_BLA : list
+            Time series data for spines in the BLA region.
+        spines_data : list
+            Processed spine data from semantic segmentation.
+        calcium_events_BLA : list
+            Calcium event probabilities for spines in the BLA region.
+        calcium_events_CA3 : list
+            Calcium event probabilities for spines in the CA3 region.
+        calcium_events_binary_BLA : list
+            Binarized calcium event probabilities for BLA spines.
+        calcium_events_binary_CA3 : list
+            Binarized calcium event probabilities for CA3 spines.
 
-    Attributes
-    ----------
-    roi_index : int
-        Index of the ROI.
-    roi_metadata : dict
-        Metadata associated with the ROI.
-    roi : object
-        Raw ROI data containing imaging or fluorescence frames.
-    dFF_CA3, zscore_CA3, ts_CA3 : list
-        dF/F traces, Z-scores, and time series for spines in the CA3 region.
-    dFF_BLA, zscore_BLA, ts_BLA : list
-        dF/F traces, Z-scores, and time series for spines in the BLA region.
-    spines_data : list
-        Processed spine data for the ROI.
-    params : dict
-        Configuration parameters for segmentation and processing.
-    base_image : np.ndarray
-        Base image for the ROI, generated from max projection of imaging data.
-    n_spines : int
-        Number of spines segmented within the ROI.
+        Attributes
+        ----------
+        roi_index : int
+            Index of the ROI.
+        roi_metadata : dict
+            Metadata associated with the ROI.
+        roi : object
+            Raw ROI data containing imaging or fluorescence frames.
+        dFF_CA3, zscore_CA3, ts_CA3 : list
+            dF/F traces, Z-scores, and time series for spines in the CA3 region.
+        dFF_BLA, zscore_BLA, ts_BLA : list
+            dF/F traces, Z-scores, and time series for spines in the BLA region.
+        spines_data : list
+            Processed spine data for the ROI.
+        params : dict
+            Configuration parameters for segmentation and processing.
+        base_image : np.ndarray
+            Base image for the ROI, generated from max projection of imaging data.
+        n_spines : int
+            Number of spines segmented within the ROI.
 
-    Notes
-    -----
-    - Metadata and configuration parameters are added as attributes
-        to the instance.
-    - The `base_image` used for segmentation is generated `get_base_image()`.
-    - The number of spines in the ROI is determined and stored in `n_spines`.
-    """
+        Notes
+        -----
+        - Metadata and configuration parameters are added as attributes
+            to the instance.
+        - The `base_image` used for segmentation is generated `get_base_image()`.
+        - The number of spines in the ROI is determined and stored in `n_spines`.
+        """
 
         self.roi_index = roi_index
         self.roi_metadata = roi_metadata
@@ -1364,6 +1576,9 @@ class RoiSegmenter:
         self.calcium_events_CA3 = calcium_events_CA3
         self.calcium_events_binary_BLA = calcium_events_binary_BLA
         self.calcium_events_binary_CA3 = calcium_events_binary_CA3
+
+        self.spine_predictions = spine_predictions
+        self.dendrite_predictions = dendrite_predictions
 
         for key, value in self.roi_metadata.items():
             setattr(self, key, value)
@@ -1414,45 +1629,6 @@ class RoiSegmenter:
                 combined_frames_uint16, axis=0)
 
         return base_image.numpy()
-
-    def inference(self, segmentation_model_fn: str or Path = None) -> None:
-        """
-        Perform segmentation inference for spines and dendrites.
-
-        Parameters
-        ----------
-        segmentation_model_fn : str or Path, optional
-            Path to the segmentation model.
-            If not provided, uses `self.segmentation_model_fn`.
-
-        Raises
-        ------
-        KeyError
-            If segmentation results are already present.
-        """
-
-        if self.spines_data is not None:
-            return
-
-        if not segmentation_model_fn:
-            segmentation_model_fn = self.segmentation_model_fn
-
-        padded_image, original_dimensions = pad_image(self.base_image)
-
-        spine_predictions, dendrite_predictions = inference(
-            padded_image,
-            segmentation_model_fn,
-            original_dimensions
-        )
-
-        self.spines_data, self.dendrites_data = process_predictions(
-            segmenters=self.roi,
-            spine_predictions=spine_predictions,
-            dendrite_predictions=dendrite_predictions,
-            config=self.params
-        )
-
-        self.n_spines = len(self.spines_data)
 
     def plot_masks(
             self,
@@ -1505,7 +1681,7 @@ class RoiSegmenter:
         """
 
         if self.spines_data is None:
-            raise KeyError("Run inference() first.")
+            raise KeyError("No spine data available. Run DatasetSegmenter.collect_all_data() first.")
 
         return plot_spine_pixel_annotation(
             spines=self,
@@ -1647,12 +1823,12 @@ class RoiSegmenter:
 
     def __getitem__(self, spine_index) -> Spine:
         if self.spines_data is None:
-            raise KeyError("Run inference() first.")
+            raise KeyError("No spine data available. Run DatasetSegmenter.collect_all_data() first.")
         return self._get_spine(spine_index)
 
     def __iter__(self):
         if self.spines_data is None:
-            raise KeyError("Run inference() first.")
+            raise KeyError("No spine data available. Run DatasetSegmenter.collect_all_data() first.")
         self._current_spine_index = 0
         return self
 
@@ -1666,7 +1842,7 @@ class RoiSegmenter:
 
     def __len__(self):
         if self.spines_data is None:
-            raise KeyError("Run inference() first.")
+            raise KeyError("No spine data available. Run DatasetSegmenter.collect_all_data() first.")
         return len(self.spines_data)
 
 
