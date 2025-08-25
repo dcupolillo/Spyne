@@ -206,18 +206,26 @@ def load_metadata_from_tiff(
 
                 # Calculate pixel kernel size from micrometers
                 kernel_size_um = dataset_instance.median_filter_kernel_size_um
-                spatial_radius_um = kernel_size_um[0]  # Assume square kernel
-                spatial_kernel_size = radius_to_kernel_size(
-                    spatial_radius_um,
-                    resolution,
+                spatial_radius_x_um = kernel_size_um[0]  # x dimension
+                spatial_radius_y_um = kernel_size_um[1]  # y dimension
+                temporal_kernel_size = int(kernel_size_um[2])
+                
+                # Convert spatial radii to kernel sizes
+                # radius_to_kernel_size takes radius and returns (height, width)
+                kernel_size_y, kernel_size_x = radius_to_kernel_size(
+                    spatial_radius_y_um,
+                    tuple(resolution),  # (x_resolution, y_resolution)
                     ensure_odd=True,
                     min_size=3
                 )
-                temporal_kernel_size = int(kernel_size_um[2])
+
+                # Create a tuple for the kernel size in pixels
+                # (temporal, height, width)
                 kernel_size_pixels = (
                     temporal_kernel_size,
-                    spatial_kernel_size[1],  # height (y) dimension
-                    spatial_kernel_size[0])  # width (x) dimension
+                    int(kernel_size_y),
+                    int(kernel_size_x)
+                )
 
                 if z not in coplanar_dict:
                     coplanar_dict[z] = []
@@ -274,6 +282,8 @@ def load_metadata_from_tiff(
                     'median_filter_kernel_size_um': (
                         dataset_instance.median_filter_kernel_size_um),
                     'median_filter_kernel_size_px': kernel_size_pixels,
+                    'pmt_artifact_detection_threshold':
+                        dataset_instance.pmt_artifact_detection_threshold
                 })
 
                 n_roi_overall += 1
@@ -306,7 +316,6 @@ def load_metadata_from_tiff(
 
 def load_imaging_data_from_tiff(
         dataset_instance: ImagingDataset,
-        threshold_factor: int = 3,
 ) -> np.ndarray:
     """
     Load and preprocess calcium imaging data from ScanImage TIFF files.
@@ -321,10 +330,6 @@ def load_imaging_data_from_tiff(
     dataset_instance : ImagingDataset
         Dataset instance containing file_list, metadata, and 
         median_filter_kernel_size_um attributes.
-    threshold_factor : int, optional
-        Multiplicative factor for PMT artifact detection threshold. 
-        Higher values are more conservative in detecting artifacts. 
-        Default is 3.
 
     Returns
     -------
@@ -353,10 +358,10 @@ def load_imaging_data_from_tiff(
 
         # raw data are dtype signed int16
         raw_frames = tifffile.imread(file_path)
+        frames = raw_frames.copy()
 
         # Negative values clipped as 0
         # FIXME: fix the range
-        frames = raw_frames.copy()
         # frames = img_as_uint(frames)
 
         # Get metadata for this file using the pre-computed mapping
@@ -369,11 +374,14 @@ def load_imaging_data_from_tiff(
 
         # Correct gating-PMT black stripe
         # Detect deviating rows for each active channel
+        pmt_artifact_detection_threshold = (
+            file_metadata.get('pmt_artifact_detection_threshold', 3))
+        
         channel_deviations = {}
         for channel_idx in active_channels:
             channel_deviations[channel_idx] = rows_deviation(
                 frames[:, channel_idx, :, :],
-                threshold_factor=threshold_factor,
+                threshold_factor=pmt_artifact_detection_threshold,
                 plot=False)
 
         # Combine deviating rows from all active channels

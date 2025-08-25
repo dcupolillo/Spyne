@@ -4,7 +4,7 @@
 import spyne
 from pathlib import Path
 
-date = "250604"
+date = "250820"
 cell_n = "cell0001"
 data_folder = Path("data")
 imaging_folder = data_folder / date / cell_n / "neuron"
@@ -36,44 +36,3 @@ segmenter.collect_all_data()
 
 # Work on single roi after data collection
 segmented_roi = segmenter[0]
-
-# Display analysis results
-segmented_roi.plot_masks()
-segmented_roi.plot_dFF()
-segmented_roi.plot_zscore()
-
-# Index individual spines
-spine = segmented_roi[0]
-
-# To launch an analysis on a complete neuron dataset
-segmenter.collect_all_data()
-
-test_model_path = Path(
-    r"C:\Users\dcupolillo\Projects\spyne",
-    r"neuralnetwork\spine_segmentation\bayesian_search",
-    r"models\model_250414_trial18.h5")
-
-segmenter = spyne.DatasetSegmenter(
-    dataset,
-    segmentation_model_fn=test_model_path)
-
-
-
-
-dates = [_dir.stem for _dir in data_folder.iterdir()]
-cell_ns = [d.stem for date in dates for d in (data_folder / date).iterdir()]
-
-dataset_list = [None] * len(dates)
-segmenter_list = [None] * len(dates)
-
-for n, (date, cell_n) in enumerate(zip(dates, cell_ns)):
-    # if dataset_list[n] is not None:
-    #     continue
-    # print(date)
-    imaging_folder = data_folder / date / cell_n / "neuron"
-    saving_folder = imaging_folder.parent / "time_series" / "3x3x3_median_filter"
-    dataset = spyne.ImagingDataset(imaging_folder, kernel_size=(3, 3, 3))
-    dataset_list[n] = dataset
-    segmenter = spyne.DatasetSegmenter(dataset)
-    segmenter.collect_all_data(save_path=saving_folder)
-    segmenter_list[n] = segmenter

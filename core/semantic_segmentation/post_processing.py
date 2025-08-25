@@ -51,8 +51,6 @@ def process_prediction(
             Minimum size for retaining dendrites after segmentation.
         - dendrite_dilation_iterations : int
             Number of dilation iterations to expand dendrite regions.
-        - kernel_size : int
-            Size of the structuring element used for morphological operations.
 
     Returns
     -------
@@ -289,8 +287,6 @@ def process_predictions(
             Minimum size for retaining dendrites after segmentation.
         - dendrite_dilation_iterations : int
             Number of dilation iterations to expand dendrite regions.
-        - kernel_size : int
-            Size of the structuring element used for morphological operations.
 
     Returns
     -------

@@ -59,6 +59,10 @@ Spyne integrates with a modular classifier—`zscore_classifier`—to detect act
 
 **Comments** : Concise and informative; avoid restating obvious code logic.
 
+**New files** : Create new files only when a new logic or groupable series of functions is needed.
+
+**Calling functions from other packages**: if a function is missing locally, but it is called from a custom python package, always assume it exists in that module
+
 ### PEP8
 
 Always follow [PEP8](https://peps.python.org/pep-0008/) formatting rules, including but not limited to:

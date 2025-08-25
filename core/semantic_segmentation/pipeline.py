@@ -1,12 +1,11 @@
 from spyne.core.semantic_segmentation.inference import inference
-from spyne.core.semantic_segmentation.post_processing import process_predictions
+from spyne.core.semantic_segmentation.post_processing import (
+    process_predictions)
 from spyne.core.semantic_segmentation.padding import pad_images
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
 from itertools import chain
-from pathlib import Path
-import flammkuchen as fl
 
 
 def run_inference_and_post_processing(
@@ -48,8 +47,6 @@ def run_inference_and_post_processing(
             Number of iterations for dilating dendrites.
         - min_spine_size : float
             Minimum size to keep spines.
-        - kernel_size : int
-            Size of the structuring element used for morphological operations.
 
     Returns
     -------
@@ -67,6 +64,8 @@ def run_inference_and_post_processing(
             device=config['device'],
         )
         pbar.update(1)
+
+        spine_predictions, dendrite_predictions = raw_predictions
 
         # Step 2: Process predictions
         processed_predictions = process_predictions(
@@ -119,8 +118,6 @@ def semantic_segmentation_pipeline(
             Number of iterations for dilating dendrites.
         - min_spine_size : float
             Minimum size to keep spines.
-        - kernel_size : int
-            Size of the structuring element for morphological operations.
         - sd_factor : int
             Multiplier of the standard deviation to use as a binary threshold.
 

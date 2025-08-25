@@ -1,6 +1,12 @@
 """ Created on Mon Jun  3 15:02:25 2024
     @author: dcupolillo """
 
+# This was refractored to the plot/ directory
+# to be used as a standalone plotting module
+# import spyne.plot as plt_spyne
+# this allows for cleaner plotting implementations
+# without direct implementation of plotting methods in the segmenter classes
+
 import numpy as np
 import math
 import matplotlib.pyplot as plt

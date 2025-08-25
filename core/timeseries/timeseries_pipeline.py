@@ -1,13 +1,15 @@
 from tqdm import tqdm
 from pathlib import Path
 import numpy as np
-import flammkuchen as fl
 import tensorflow as tf
+
+from spyne.core.timeseries.calculate_timeseries import dFF, get_timestamps, z_score
 
 
 def collect_timeseries(
-    segmenters: list,
+    dataset,
     spines_data: list,
+    metadata: dict,
     device: str,
     output_folder: str or Path,
 ) -> tuple:
@@ -16,10 +18,12 @@ def collect_timeseries(
 
     Parameters
     ----------
-    segmenters : list
-        List of RoiSegmenter objects, one for each ROI in the dataset.
+    dataset : ImagingDataset
+        The imaging dataset containing ROI data.
     spines_data : list
         Processed spine data from semantic segmentation.
+    metadata : dict
+        ROI metadata dictionary containing frame rates, ADC lists, etc.
     device : str
         Device to perform calculations ('/GPU:0' or '/CPU:0').
     output_folder : str or Path
@@ -39,88 +43,107 @@ def collect_timeseries(
     output_folder = Path(output_folder)
     total_spines = len(spines_data)
 
-    # Initialize lists
-    zscores_CA3 = []
-    dFF_CA3 = []
-    ts_CA3 = []
+    if total_spines == 0:
+        # Return empty arrays if no spines
+        empty_array = np.array([])
+        return (
+            empty_array,
+            empty_array,
+            empty_array,
+            empty_array,
+            empty_array,
+            empty_array)
 
-    zscores_BLA = []
-    dFF_BLA = []
-    ts_BLA = []
+    # Get metadata from first ROI to determine array shapes
+    first_roi_meta = metadata[0]
+    n_frames = first_roi_meta['n_frames']
+    n_IN3 = first_roi_meta['adc_list'].count('IN 3')
+    n_IN2 = first_roi_meta['adc_list'].count('IN 2')
+
+    # Pre-allocate numpy arrays with shape (n_spines, n_sweeps, n_frames)
+    zscores_CA3 = np.empty((total_spines, n_IN3, n_frames), dtype=np.float32)
+    dFF_CA3 = np.empty((total_spines, n_IN3, n_frames), dtype=np.float32)
+    ts_CA3 = np.empty((total_spines, n_IN3, n_frames), dtype=np.float32)
+
+    zscores_BLA = np.empty((total_spines, n_IN2, n_frames), dtype=np.float32)
+    dFF_BLA = np.empty((total_spines, n_IN2, n_frames), dtype=np.float32)
+    ts_BLA = np.empty((total_spines, n_IN2, n_frames), dtype=np.float32)
+
+    # Fill arrays with NaN for missing data
+    zscores_CA3.fill(np.nan)
+    dFF_CA3.fill(np.nan)
+    ts_CA3.fill(np.nan)
+    zscores_BLA.fill(np.nan)
+    dFF_BLA.fill(np.nan)
+    ts_BLA.fill(np.nan)
 
     with tf.device(device):
 
         with tqdm(total=total_spines, desc="Collecting timeseries") as pbar:
 
-            for roi_segmenter in segmenters:
+            # Process each spine directly
+            for global_spine_index, spine_data in enumerate(spines_data):
 
-                roi_n = roi_segmenter.n_roi
+                roi_n = spine_data['roi_n']
+                roi_meta = metadata[roi_n]
+                roi_data = dataset[roi_n]
 
-                n_spines = len(
-                    [z for z in spines_data
-                     if z['roi_n'] == roi_n])
+                # Extract spine parameters directly
+                spine_mask = spine_data['mask']
+                n_frames = roi_meta['n_frames']
+                frame_rate = roi_meta['frame_rate']
 
-                if n_spines == 0:
-                    continue
+                index_CA3 = 0
+                index_BLA = 0
 
-                n_IN3 = roi_segmenter.adc_list.count('IN 3')
-                n_IN2 = roi_segmenter.adc_list.count('IN 2')
+                for sweep_index in range(roi_meta['n_sweeps']):
 
-                for spine_index, spine in enumerate(roi_segmenter):
+                    adc_value = roi_meta['adc_list'][sweep_index]
 
-                    z_scores_CA3 = np.empty(n_IN3, dtype=object)
-                    dff_values_CA3 = np.empty(n_IN3, dtype=object)
-                    timestamps_CA3 = np.empty(n_IN3, dtype=object)
-                    z_scores_BLA = np.empty(n_IN2, dtype=object)
-                    dff_values_BLA = np.empty(n_IN2, dtype=object)
-                    timestamps_BLA = np.empty(n_IN2, dtype=object)
+                    # Calculate timeseries using core functions directly
+                    z_tensor = z_score(
+                        n_frames=n_frames,
+                        roi=roi_data,
+                        mask=spine_mask,
+                        frame_rate=frame_rate,
+                        sweep_index=sweep_index
+                    )
+                    dff_tensor = dFF(
+                        n_frames=n_frames,
+                        roi=roi_data,
+                        mask=spine_mask,
+                        frame_rate=frame_rate,
+                        sweep_index=sweep_index,
+                        rolling_bsl='centered',
+                        window_sec=0.5,
+                        min_quantile=10
+                    )
+                    ts_tensor = get_timestamps(
+                        n_frames=n_frames,
+                        frame_rate=frame_rate
+                    )
 
-                    index_CA3 = 0
-                    index_BLA = 0
+                    # Convert to numpy
+                    z_score_np = z_tensor.numpy()
+                    dff_value_np = dff_tensor.numpy()
+                    timestamp_np = ts_tensor.numpy()
 
-                    for sweep_index in range(roi_segmenter.n_sweeps):
+                    if adc_value == 'IN 3':
+                        zscores_CA3[global_spine_index, index_CA3, :] = z_score_np
+                        dFF_CA3[global_spine_index, index_CA3, :] = dff_value_np
+                        ts_CA3[global_spine_index, index_CA3, :] = timestamp_np
+                        index_CA3 += 1
 
-                        adc_value = roi_segmenter.adc_list[sweep_index]
+                    elif adc_value == 'IN 2':
+                        zscores_BLA[global_spine_index, index_BLA, :] = z_score_np
+                        dFF_BLA[global_spine_index, index_BLA, :] = dff_value_np
+                        ts_BLA[global_spine_index, index_BLA, :] = timestamp_np
+                        index_BLA += 1
+                    else:
+                        print("unknown adc")
 
-                        z_score = spine.zscore(sweep_index)
-                        dff_value = spine.f(sweep_index)
-                        timestamp = spine.ft(sweep_index)
-
-                        if adc_value == 'IN 3':
-                            z_scores_CA3[index_CA3] = z_score
-                            dff_values_CA3[index_CA3] = dff_value
-                            timestamps_CA3[index_CA3] = timestamp
-                            index_CA3 += 1
-
-                        elif adc_value == 'IN 2':
-                            z_scores_BLA[index_BLA] = z_score
-                            dff_values_BLA[index_BLA] = dff_value
-                            timestamps_BLA[index_BLA] = timestamp
-                            index_BLA += 1
-                        else:
-                            print("unknown adc")
-
-                    # Sanity check to ensure sweep number consistency
-                    assert (index_CA3 + index_BLA) == (sweep_index + 1)
-
-                    zscores_CA3.append(list(z_scores_CA3))
-                    dFF_CA3.append(list(dff_values_CA3))
-                    ts_CA3.append(list(timestamps_CA3))
-                    zscores_BLA.append(list(z_scores_BLA))
-                    dFF_BLA.append(list(dff_values_BLA))
-                    ts_BLA.append(list(timestamps_BLA))
-
-                    pbar.update(1)
-
-                if not n_spines == 0:
-                    assert spine_index == (n_spines - 1)
-
-    # Save the arrays to disk
-    fl.save(output_folder / "zscores_CA3.h5", zscores_CA3)
-    fl.save(output_folder / "dFF_CA3.h5", dFF_CA3)
-    fl.save(output_folder / "ts_CA3.h5", ts_CA3)
-    fl.save(output_folder / "zscores_BLA.h5", zscores_BLA)
-    fl.save(output_folder / "dFF_BLA.h5", dFF_BLA)
-    fl.save(output_folder / "ts_BLA.h5", ts_BLA)
+                # Sanity check to ensure sweep number consistency
+                assert (index_CA3 + index_BLA) == roi_meta['n_sweeps']
+                pbar.update(1)
 
     return zscores_CA3, dFF_CA3, ts_CA3, zscores_BLA, dFF_BLA, ts_BLA

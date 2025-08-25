@@ -1,5 +1,6 @@
 """ Created on Mon Oct 30 13:59:21 2023
     @author: dcupolillo """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -29,10 +30,10 @@ class ImagingDataset:
 
     Note
     ----
-    The median filter kernel size is specified in micrometers for spatial
-    dimensions and frames for temporal dimension. Larger kernel sizes will
-    significantly increase loading time. Default (0.3, 0.3, 3) provides
-    minimal noise reduction with fast processing time.
+    The median filter kernel size is specified as (spatial_x, spatial_y, temporal)
+    where spatial values are radii in micrometers and temporal is kernel size in frames.
+    Larger kernel sizes will significantly increase loading time. Default (0.3, 0.3, 3) 
+    provides minimal noise reduction with fast processing time.
 
     Example
     -------
@@ -48,7 +49,8 @@ class ImagingDataset:
     def __init__(
             self,
             folder: str or Path,
-            kernel_size_um: tuple = (0.3, 0.3, 3)
+            kernel_size_um: tuple = (0.3, 0.3, 3),
+            pmt_artifact_detection_threshold: int = 3
     ) -> None:
         """
         Initialize the ImagingDataset.
@@ -58,9 +60,14 @@ class ImagingDataset:
         paths : NeuronPath
             Path manager containing paths to imaging and associated files.
         kernel_size_um : tuple, optional
-            Size of the 3D median filter kernel. First two values are spatial
-            dimensions in micrometers (converted to pixels), third value is
-            temporal dimension in frames. Default is (0.3, 0.3, 3).
+            Size of the 3D median filter kernel as (spatial_x, spatial_y, temporal).
+            First two values are spatial filter radii in micrometers (converted to 
+            pixel diameters), third value is temporal kernel size in frames. 
+            Default is (0.3, 0.3, 3) for light filtering.
+        pmt_artifact_detection_threshold : int, optional
+            Multiplicative factor for PMT artifact detection threshold. 
+            Higher values are more conservative in detecting artifacts. 
+            Default is 3.
 
         Raises
         ------
@@ -85,9 +92,16 @@ class ImagingDataset:
 
         if not len(kernel_size_um) == 3:
             raise Exception("kernel_size_um must be of size 3.")
-
-        self.folder = folder
+        
+        if not isinstance(pmt_artifact_detection_threshold, int):
+            raise TypeError(
+                "'pmt_artifact_detection_threshold' must be an integer.")
+        
+        self.folder = Path(folder)
         self.parent_folder = folder.parent
+
+        _, self.date, self.cell_number, _ = self.folder.parts
+        self.name = f"{self.date}_{self.cell_number}"
 
         self.file_list = [
             file_path for file_path in folder.rglob('*')
@@ -96,8 +110,15 @@ class ImagingDataset:
         self.abf_file_list = [
             file_path for file_path in folder.rglob('*')
             if file_path.suffix.lower() == ".abf"]
+        
+        if not self.file_list:
+            raise Exception(f"No imaging files found in {folder}.")
+        
+        if not self.abf_file_list:
+            raise Exception(f"No ABF files found in {folder}.")
 
         self.median_filter_kernel_size_um = kernel_size_um
+        self.pmt_artifact_detection_threshold = pmt_artifact_detection_threshold
 
         stack_file = next(
             (f for f in folder.parent.glob('**/*')
