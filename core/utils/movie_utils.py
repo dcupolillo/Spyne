@@ -5,50 +5,27 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-# def rows_deviation(
-#         frames: np.ndarray,
-#         threshold_factor: int = 3
-# ) -> dict:
+def modify_frames(
+        frames: np.ndarray,
+        deviating_rows_dict: dict
+) -> np.ndarray:
+    """
+    Apply interpolation by averaging neighboring frames
+    to the frames showing deviating rows.
 
-#     frame_to_rows = {}
+    Parameters
+    ----------
+    frames : np.ndarray
+        4D array of shape (n_frames, n_channels, height, width)
+        representing the image data.
+    deviating_rows_dict : dict
+        Mapping from frame indices to lists of deviating row indices.
 
-#     intensity_profiles = [np.mean(frame, axis=1) for frame in frames]
-#     average_profile = np.mean(intensity_profiles, axis=0)
-#     std_profile = np.std(intensity_profiles, axis=0)
-
-#     upper_tolerance_line = average_profile + threshold_factor * std_profile
-#     lower_tolerance_line = average_profile - threshold_factor * std_profile
-
-#     for i, profile in enumerate(intensity_profiles):
-#         deviating_rows = []
-
-#         for j in range(len(profile)):
-#             if (profile[j] > upper_tolerance_line[j] or
-#                     profile[j] < lower_tolerance_line[j]):
-#                 deviating_rows.append(j)
-
-#         deviating_rows.sort()
-#         consecutive_groups = []
-#         current_group = [deviating_rows[0]] if deviating_rows else []
-
-#         for k in range(1, len(deviating_rows)):
-#             if deviating_rows[k] == deviating_rows[k-1] + 1:
-#                 current_group.append(deviating_rows[k])
-#             else:
-#                 if len(current_group) > 1:
-#                     consecutive_groups.extend(current_group)
-#                 current_group = [deviating_rows[k]]
-
-#         if len(current_group) > 1:
-#             consecutive_groups.extend(current_group)
-
-#         if consecutive_groups:
-#             frame_to_rows[i] = consecutive_groups
-
-#     return frame_to_rows
-
-
-def modify_frames(frames, deviating_rows_dict):
+    Returns
+    -------
+    np.ndarray
+        Modified frames with interpolated values for deviating rows.
+    """
     modified_frames = np.copy(frames)
 
     for frame_number, deviating_rows in deviating_rows_dict.items():
@@ -69,11 +46,29 @@ def modify_frames(frames, deviating_rows_dict):
     return modified_frames
 
 
-def rows_deviation(
+def identify_rows_deviation(
         frames: np.ndarray,
         threshold_factor: int = 3,
         plot: bool = False
 ) -> dict:
+    """
+    Identify rows with significant intensity deviations across frames.
+
+    Parameters
+    ----------
+    frames : np.ndarray
+        4D array of shape (n_frames, n_channels, height, width)
+        representing the image data.
+    threshold_factor : int
+        Factor to determine the sensitivity of deviation detection.
+    plot : bool
+        Whether to plot the intensity profiles and deviations.
+
+    Returns
+    -------
+    dict
+        Mapping from frame indices to lists of deviating row indices.
+    """
 
     frame_to_rows = {}
     intensity_profiles = [np.mean(frame, axis=1) for frame in frames]
@@ -176,3 +171,46 @@ def rows_deviation(
         plt.tight_layout()
 
     return frame_to_rows
+
+
+def collect_deviating_rows_for_channels(
+        frames: np.ndarray,
+        active_channels: list,
+        threshold_factor: int = 3
+) -> dict:
+    """
+    Collect all deviating rows across channels for each frame.
+
+    Parameters
+    ----------
+    frames : np.ndarray
+        Imaging data, shape (n_frames, n_channels, height, width).
+    active_channels : list
+        List of channel indices to process.
+    threshold_factor : int, optional
+        Threshold factor for deviation detection.
+
+    Returns
+    -------
+    dict
+        Mapping from frame index to sorted list of deviating rows.
+    """
+    channel_deviations = {}
+    for channel_idx in active_channels:
+        channel_deviations[channel_idx] = identify_rows_deviation(
+            frames[:, channel_idx, :, :],
+            threshold_factor=threshold_factor,
+            plot=False)
+
+    deviating_rows = {}
+    all_frames = set()
+    for channel_deviation in channel_deviations.values():
+        all_frames.update(channel_deviation.keys())
+
+    for frame in all_frames:
+        rows_for_frame = []
+        for channel_deviation in channel_deviations.values():
+            rows_for_frame.extend(channel_deviation.get(frame, []))
+        deviating_rows[frame] = sorted(set(rows_for_frame))
+
+    return dict(sorted(deviating_rows.items()))

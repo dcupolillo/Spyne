@@ -6,7 +6,10 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from matplotlib.animation import FuncAnimation
 from matplotlib.gridspec import GridSpec
+from matplotlib.transforms import Affine2D
 from scipy.stats import sem
+from spyne.core.imagingdataset import Roi
+from spyne.core.utils.spine_node import euclidean_distance
 
 
 def _collect_centroid_fov(
@@ -72,6 +75,74 @@ def _collect_centroid_fov_3d(
     return centroid_fov_list
 
 
+def add_hscalebar(
+        x_start: float,
+        x_length: float,
+        y_position: float,
+        ax: plt.Axes,
+        legend: str = None,
+        legend_offset: float = 0.1,
+        **kwargs
+) -> None:
+
+    default_kwargs = {
+        "color": "black",
+        "linewidth": 2
+    }
+
+    scalebar_kwargs = {**default_kwargs, **kwargs}
+
+    # Add horizontal scale bar
+    ax.hlines(
+        y=y_position,
+        xmin=x_start, xmax=x_start + x_length,
+        **scalebar_kwargs
+    )
+
+    if legend:
+        ax.text(
+            x_start + x_length / 2,
+            y_position + legend_offset,
+            legend,
+            ha='center',
+            va='bottom' if legend_offset > 0 else 'top',
+        )
+
+
+def add_vscalebar(
+        y_start: float,
+        y_length: float,
+        x_position: float,
+        ax: plt.Axes,
+        legend: str = None,
+        legend_offset: float = 0.1,
+        **kwargs
+) -> None:
+
+    default_kwargs = {
+        "color": "black",
+        "linewidth": 2
+    }
+
+    scalebar_kwargs = {**default_kwargs, **kwargs}
+
+    # Add vertical scale bar
+    ax.vlines(
+        x=x_position,
+        ymin=y_start, ymax=y_start + y_length,
+        **scalebar_kwargs
+    )
+
+    if legend:
+        ax.text(
+            y_start + y_length / 2,
+            x_position + legend_offset,
+            legend,
+            ha='left' if legend_offset > 0 else 'right',
+            va='center',
+        )
+
+
 def scatter(
         spines: list,
         scan_angle: bool = False,
@@ -107,8 +178,11 @@ def scatter(
     -------
     None
     """
-    if not isinstance(spines, list):
+    if not isinstance(spines, (list, dict)):
         raise TypeError("spines must be a list of dictionaries.")
+
+    if isinstance(spines, dict):
+        spines = [spines]
 
     if projection not in ['2d', '3d']:
         raise ValueError("projection must be '2d' or '3d'")
@@ -584,7 +658,8 @@ def animate_spines(
 def heatmap(
     data: np.ndarray,
     ts: np.ndarray,
-    binary: np.ndarray,
+    binary: np.ndarray = None,
+    select_binary: int = 1,
     vmin: float = 0.0,
     vmax: float = 1.0,
     cmap: str = "viridis",
@@ -592,7 +667,8 @@ def heatmap(
     scalebar_length: float = 0.25,
     scalebar_x: float = 13.0,
     scalebar_y_start: float = 0.3,
-    colorbar_label: str = r"$\Delta F / F_0$"
+    colorbar_label: str = r"$\Delta F / F_0$",
+    framerate: float = 16.0
 ) -> tuple:
     """
     Plot a heatmap and mean trace for selected trials (dFF or zscore).
@@ -605,6 +681,9 @@ def heatmap(
         Array of timestamps for each trial.
     binary : np.ndarray
         Binary array (n_spines, n_trials) indicating selected trials.
+        If not provided, plots all trials. Default is None.
+    select_binary : int, optional
+        Binary value indicating which trials to select. Default is 1.
     vmin : float, optional
         Minimum value for colormap. Default is 0.0.
     vmax : float, optional
@@ -621,6 +700,8 @@ def heatmap(
         Y position of the scalebar. Default is 0.3.
     colorbar_label : str, optional
         Label for the colorbar. Default is r"$\Delta F / F_0$".
+    framerate : float, optional
+        Frame rate for the heatmap animation. Default is 16.
 
     Returns
     -------
@@ -640,17 +721,16 @@ def heatmap(
     - The function is flexible for both types.
     """
 
-    # Select trials where binary == 1
-    spine_sweep_indices = np.argwhere(binary == 1)
-    selected_data = data[spine_sweep_indices[:, 0], spine_sweep_indices[:, 1], :]
+    if binary is not None:
+        spine_sweep_indices = np.argwhere(binary == select_binary)
+        data = data[spine_sweep_indices[:, 0], spine_sweep_indices[:, 1], :]
 
-    mean_trace = np.mean(selected_data, axis=0)
-    sem_trace = sem(selected_data, axis=0, nan_policy='omit')
+    mean_trace = np.mean(data, axis=0)
+    sem_trace = sem(data, axis=0, nan_policy='omit')
 
     # Use first trial's timestamps for x-axis
     timestamps = ts[0][0]
-    frame_rate = 16
-    tick_interval = frame_rate
+    tick_interval = framerate
     tick_indices = np.arange(0, len(timestamps), tick_interval)
     tick_labels = timestamps[tick_indices].round(1)
 
@@ -662,31 +742,31 @@ def heatmap(
         hspace=0.05, wspace=0.05,
         top=0.99, bottom=0.08)
 
-    ax0 = fig.add_subplot(gs[0, 0])  # mean trace
-    ax1 = fig.add_subplot(gs[1, 0])  # heatmap
-    cax = fig.add_subplot(gs[1, 1])  # colorbar
+    mean_trace_ax = fig.add_subplot(gs[0, 0])
+    heatmap_ax = fig.add_subplot(gs[1, 0])
+    cax = fig.add_subplot(gs[1, 1])
 
     # Mean trace
-    ax0.plot(np.arange(len(mean_trace)), mean_trace, color="black")
-    ax0.fill_between(
+    mean_trace_ax.plot(np.arange(len(mean_trace)), mean_trace, color="black")
+    mean_trace_ax.fill_between(
         np.arange(len(sem_trace)),
         mean_trace - sem_trace,
         mean_trace + sem_trace,
         color=color, alpha=0.4)
 
-    ax0.plot(
+    mean_trace_ax.plot(
         [scalebar_x, scalebar_x],
         [scalebar_y_start, scalebar_y_start + scalebar_length],
         color="black", lw=2.)
 
-    for spine in ax0.spines.values():
+    for spine in mean_trace_ax.spines.values():
         spine.set_visible(False)
-    ax0.set(ylim=(0, 1), yticks=[], xticks=[], xlim=(0, len(sem_trace)))
-    ax0.tick_params("both", length=0)
+    mean_trace_ax.set(ylim=(0, 1), yticks=[], xticks=[], xlim=(0, len(sem_trace)))
+    mean_trace_ax.tick_params("both", length=0)
 
     # Heatmap
-    im = ax1.imshow(
-        selected_data,
+    im = heatmap_ax.imshow(
+        data,
         aspect='auto', cmap=cmap,
         vmin=vmin, vmax=vmax)
 
@@ -698,18 +778,238 @@ def heatmap(
         yticklabels=np.linspace(vmin, vmax, 4))
 
     # Heatmap ticks and labels
-    ax1.set(
+    heatmap_ax.set(
         xlabel="Time around stim. (s)",
-        ylim=(0, len(selected_data) - 1),
-        yticks=np.linspace(0, selected_data.shape[0] - 1, 2),
-        yticklabels=np.linspace(1, selected_data.shape[0], 2, dtype=int),
+        ylim=(0, len(data) - 1),
+        yticks=np.linspace(0, data.shape[0] - 1, 2),
+        yticklabels=np.linspace(1, data.shape[0], 2, dtype=int),
         xticks=tick_indices,
         xticklabels=tick_labels)
-    ax1.set_ylabel("Trials", labelpad=-2)
+    heatmap_ax.set_ylabel("Trials", labelpad=-2)
 
-    ax_top = ax1.secondary_xaxis('top')
-    ax_top.set_xticks([tick_indices[1]] if len(tick_indices) > 1 else [])
-    ax_top.set_xticklabels([''] if len(tick_indices) > 1 else [])
-    ax_top.tick_params(axis='x', direction='out', top=True, labeltop=True)
+    heatmap_secondary_axis = heatmap_ax.secondary_xaxis('top')
+    heatmap_secondary_axis.set_xticks([tick_indices[1]] if len(tick_indices) > 1 else [])
+    heatmap_secondary_axis.set_xticklabels([''] if len(tick_indices) > 1 else [])
+    heatmap_secondary_axis.tick_params(axis='x', direction='out', top=True, labeltop=True)
 
-    return fig, (ax0, ax1)
+    return fig, (mean_trace_ax, heatmap_ax)
+
+
+def tile(
+        roi_list: list,
+        ax: plt.Axes = None,
+        **kwargs
+) -> tuple:
+    """
+    Tile the given regions of interest (ROIs) on the provided axes.
+
+    Parameters
+    ----------
+    roi_list : list
+        List of ROIs to tile.
+    ax : plt.Axes, optional
+        Matplotlib axes to plot on.
+        If None, a new figure and axes are created.
+    **kwargs
+        Additional keyword arguments passed to imshow.
+
+    Returns
+    -------
+    tuple
+        The figure and axes objects.
+
+    Notes
+    -----
+    This function expects a list of spyne.core.imagingdataset.Roi objects.
+    """
+
+    if not isinstance(roi_list, list) and isinstance(roi_list, Roi):
+        roi_list = [roi_list]
+
+    if not all(isinstance(roi, Roi) for roi in roi_list):
+        raise TypeError(
+            "All elements in roi_list must be"
+            "instances of spyne.core.imagingdataset.Roi")
+
+    if ax is None:
+        _, ax = plt.subplots()
+
+    default_kwargs = {
+        "cmap": "binary_r",
+        "alpha": 0.5,
+    }
+    # Merge default kwargs with user-supplied kwargs (user overrides default)
+    imshow_kwargs = {**default_kwargs, **kwargs}
+
+    for roi in roi_list:
+        image = roi[0].ch2.maxproj.frame
+        pix_to_ref = np.array(roi.roi_metadata["pixel_to_ref_transform"])
+        translate = np.array(roi.roi_metadata["translate"])
+        full_transform = np.matmul(pix_to_ref, translate)
+
+        transform = Affine2D()
+        transform.set_matrix(full_transform)
+
+        ax.imshow(
+            image,
+            transform=transform + ax.transData,
+            **imshow_kwargs
+        )
+
+    ax.set_aspect("equal")
+    ax.autoscale()
+
+
+def dendrogram(
+        nodes_list: list,
+        spine_list: list,
+        ax: plt.Axes = None,
+        spine_length: float = 1.0,
+        alternate_spine_length: bool = False,
+        branch_y: float = 0.0,
+        branch_kwargs: dict = None,
+        spine_kwargs: dict = None,
+        spine_head_kwargs: dict = None,
+        spine_positions_on_dendrogram: np.ndarray = None
+) -> None:
+    """
+    Create a dendrogram plot from the given dendrite and spines.
+
+    Parameters
+    ----------
+    nodes_list : list
+        List of nodes to include in the dendrogram.
+    spine_list : list
+        List of spines to include in the dendrogram.
+    ax : plt.Axes, optional
+        Matplotlib axes to plot on. Default is None.
+    spine_length : float, optional
+        Length of the spine lines. Default is 1.0.
+    alternate_spine_length : bool, optional
+        Whether to alternate spine lengths. Default is False.
+    branch_y : float, optional
+        Y position of the branch line. Default is 0.0.
+    branch_kwargs : dict, optional
+        Additional arguments passed to the branch line plot.
+    spine_kwargs : dict, optional
+        Additional arguments passed to the spine lines plot.
+    spine_head_kwargs : dict, optional
+        Additional arguments passed to the spine head scatter plot.
+
+    Returns
+    -------
+    None
+    """
+
+    # Make sure nodes belong to the same dendrite
+    if not all(
+            node.branch_id == nodes_list[0].branch_id for node in nodes_list):
+        raise ValueError("All nodes must belong to the same dendrite.")
+
+    # Make sure spines are on the same branch
+    if not all(
+            spine["branch_id"] == spine_list[0]["branch_id"]
+            for spine in spine_list):
+        raise ValueError("All spines must belong to the same branch.")
+
+    # # Make sure spines are on the same branch
+    # if not spine_list[0]["branch_id"] == nodes_list[0].branch_id:
+    #     raise ValueError("All spines must belong to the same branch.")
+
+    # Check branch and spine kwargs
+    if branch_kwargs is not None and not isinstance(branch_kwargs, dict):
+        raise TypeError("branch_kwargs must be a dictionary.")
+    if spine_kwargs is not None and not isinstance(spine_kwargs, dict):
+        raise TypeError("spine_kwargs must be a dictionary.")
+
+    # Branch kwargs and spine kwargs defaults
+    branch_defaults = {
+        "color": "black",
+        "linewidth": 2,
+        "linestyle": "-",
+    }
+    spine_defaults = {
+        "color": "crimson",
+        "linewidth": 1.5,
+    }
+    spine_head_defaults = {
+        "color": "crimson",
+        "s": 20,
+        "edgecolor": "black",
+        "linewidth": 0.5,
+    }
+
+    # Merge user-supplied kwargs (user overrides default)
+    branch_kwargs = {**branch_defaults, **(branch_kwargs or {})}
+    spine_kwargs = {**spine_defaults, **(spine_kwargs or {})}
+    spine_head_kwargs = {**spine_head_defaults, **(spine_head_kwargs or {})}
+
+    # Extract xyz positions from nodes
+    positions = [(node.x, node.y, node.z) for node in nodes_list]
+    # Calculate cumulative distances along the branch
+    distances = [0]
+    for i in range(1, len(positions)):
+        d = euclidean_distance(positions[i-1], positions[i])
+        distances.append(distances[-1] + d)
+
+    # Map node.id to dendrogram coordinate (distance)
+    node_id_to_dendro_coord = {
+        node.id: dist for node, dist in zip(nodes_list, distances)}
+
+    # Plot horizontal segment (branch)
+    if ax is None:
+        _, ax = plt.subplots(figsize=(8, 2), layout="constrained")
+
+    ax.plot(
+        distances,
+        [branch_y]*len(distances),
+        zorder=2,
+        clip_on=False,
+        **branch_kwargs)
+
+    # Plot spines at their mapped dendrogram coordinate
+    if spine_positions_on_dendrogram is not None:
+
+        spine_x = np.asarray(spine_positions_on_dendrogram, dtype=float)
+        if spine_x.shape[0] != len(spine_list):
+            raise ValueError(
+                "spine_positions_on_dendrogram must match len(spine_list).")
+        # Optionally clamp to branch extent:
+        # spine_x = np.clip(spine_x, distances.min(), distances.max())
+    else:
+        # default: use closest_node_id mapping
+        spine_x = []
+        for sp in spine_list:
+            cid = sp["closest_node_id"]
+            if cid not in node_id_to_dendro_coord:
+                raise KeyError(f"closest_node_id {cid} not in nodes_list.")
+            spine_x.append(node_id_to_dendro_coord[cid])
+        spine_x = np.asarray(spine_x, dtype=float)
+
+    for spine_n, (sp, dendro_x) in enumerate(zip(spine_list, spine_x)):
+
+        this_spine_length = (
+            spine_length if not alternate_spine_length
+            else (spine_length if spine_n % 2 == 0 else -spine_length))
+
+        y_top = branch_y + this_spine_length
+
+        ax.plot(
+            [dendro_x, dendro_x],
+            [branch_y, y_top],
+            zorder=1,
+            clip_on=False,
+            **spine_kwargs)
+        ax.scatter(
+            dendro_x,
+            y_top,
+            zorder=3,
+            clip_on=False,
+            **spine_head_kwargs)
+
+    ax.set(
+        xlabel='Distance from origin (μm)',
+        yticks=[]
+    )
+    ax.spines[['top', 'right', 'left']].set_visible(False)
+    ax.tick_params(axis='y', length=0)

@@ -485,8 +485,6 @@ class DatasetSegmenter:
             (e.g., z-scores, dF/F) for all spines detected during segmentation.
         """
 
-        saving_folder = (
-            self._dataset.folder.parent if save_path is None else save_path)
         (
             segmenters,
             self.spines_data,
@@ -520,6 +518,10 @@ class DatasetSegmenter:
             spine_counter += n_spines_per_roi
 
         if save:
+            saving_folder = (
+                self._dataset.folder.parent
+                if save_path is None else save_path)
+
             data_to_save = {
                 "spines_data.h5": getattr(self, 'spines_data', []),
                 "dendrites_data.h5": getattr(self, 'dendrites_data', []),

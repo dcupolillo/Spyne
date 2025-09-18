@@ -10,6 +10,8 @@ Example
 >>>> import plot as plt_spyne
 >>>> dataset = spyne.ImagingDataset(path/to/imaging_folder)
 >>>> segmenter = spyne.DatasetSegmenter(dataset)
+>>>>
+>>>> plt_spyne.scatter(segmenter.spines_data)
 
 """
 

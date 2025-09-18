@@ -4,6 +4,7 @@
 import numpy as np
 from scipy.ndimage import binary_dilation
 from skimage.measure import moments
+import tensorflow as tf
 
 
 def threshold_prediction(
@@ -217,3 +218,133 @@ def calculate_centroid(
     cy, cx = M[1, 0] / M[0, 0], M[0, 1] / M[0, 0]
 
     return (cy, cx)
+
+
+def transform(
+        point_to_transform: list or np.ndarray,
+        sf_to_ref_T: np.ndarray,
+        pix_to_ref_T: np.ndarray,
+        center_xy: list,
+) -> np.ndarray:
+    """
+    Transforms pixel coordinates directly to scanner space coordinates.
+    This function accounts for different scanner (ResScan / LinScan)
+    field-of-views (FOVs) by using a common normalized reference space.
+    The reference space has X and Y coordinates ranging from 0 to 1,
+    representing the maximum extents of the scanners
+    while maintaining their true aspect ratios.
+    The scanner space is mapped into the common reference space
+    via affine transformation.
+    All Scanfields (including RotatedRectangle) defined within scanner space
+    are mapped to reference space via affine transformation.
+    Scanfields of type RotatedRectangle have two associated
+    affine matrices that allow coordinate space conversions:
+        - pixelToRefTransfrom: transform pixel coordinates to reference space
+        - affine: transform scanfield coordinates to reference space.
+    The inverted matrix T^-1 allows for the opposite transformation.
+    Parameters
+    ----------
+    point_to_transform : TYPE
+        DESCRIPTION.
+    sf_to_ref_T : np.ndarray
+        DESCRIPTION.
+    pix_to_ref_T : np.ndarray
+        DESCRIPTION.
+    center_xy : list
+        DESCRIPTION.
+    Returns
+    -------
+    points_in_scanfield : TYPE
+        DESCRIPTION.
+    """
+    if len(point_to_transform) == 0:
+        return np.array([])
+    point_to_transform = np.array(point_to_transform)
+    if point_to_transform.ndim == 1:
+        point_to_transform = point_to_transform.reshape(1, -1)
+    if point_to_transform.shape[1] != 2:
+        raise ValueError("point_to_transform should have shape (n_points, 2)")
+    # From pixel space to reference space
+    transformed_pt = np.dot(point_to_transform, pix_to_ref_T.T[:-1, :-1])
+    # From reference space to scanner space
+    center_pt = [0.5, 0.5]  # Generic center of normalized reference space
+    center_pt_ref = np.dot(center_pt, sf_to_ref_T.T[:-1, :])
+    # Calculate ROI center translation compared to center
+    dx = center_xy[0] - center_pt_ref[0]
+    dy = center_xy[1] - center_pt_ref[1]
+    # Generate translation matrix
+    T_translate = np.array([[1, 0, dx],
+                            [0, 1, dy],
+                            [0, 0, 1]])
+    # Apply translation
+    points_in_scanfield = np.dot(
+        np.column_stack((transformed_pt,
+                         np.ones(transformed_pt.shape[0]))),
+        T_translate.T)[:, :2]
+    return points_in_scanfield
+
+
+def tf_transform(
+        point_to_transform: tf.Tensor,
+        sf_to_ref_T: tf.Tensor,
+        pix_to_ref_T: tf.Tensor,
+        center_xy: tf.Tensor,
+        pixelresolution_xy: tf.Tensor
+) -> tf.Tensor:
+    """
+    Transforms pixel coordinates directly to scanner space coordinates.
+    This function accounts for different scanner (ResScan / LinScan)
+    field-of-views (FOVs) by using a common normalized reference space.
+    The reference space has X and Y coordinates ranging from 0 to 1,
+    representing the maximum extents of the scanners
+    while maintaining their true aspect ratios.
+    The scanner space is mapped into the common reference space
+    via affine transformation.
+    All Scanfields (including RotatedRectangle) defined within scanner space
+    are mapped to reference space via affine transformation.
+    Scanfields of type RotatedRectangle have two associated
+    affine matrices that allow coordinate space conversions:
+        - pixelToRefTransfrom: transform pixel coordinates to reference space
+        - affine: transform scanfield coordinates to reference space.
+    The inverted matrix T^-1 allows for the opposite transformation.
+    Parameters
+    ----------
+    point_to_transform : tf.Tensor
+        Tensor of points to transform.
+    sf_to_ref_T : tf.Tensor
+        Transformation matrix from scanfield to reference space.
+    pix_to_ref_T : tf.Tensor
+        Transformation matrix from pixel to reference space.
+    center_xy : tf.Tensor
+        Center coordinates in the XY plane.
+    pixelresolution_xy : tf.Tensor
+        Pixel resolution in the XY plane.
+    Returns
+    -------
+    tf.Tensor
+        Transformed points in the scanfield.
+    """
+    if tf.shape(point_to_transform)[0] == 0:
+        return tf.constant([], shape=(0, 2), dtype=tf.float32)
+    point_to_transform = tf.convert_to_tensor(point_to_transform, dtype=tf.float32)
+    if point_to_transform.ndim == 1:
+        point_to_transform = tf.reshape(point_to_transform, (1, -1))
+    if tf.shape(point_to_transform)[1] != 2:
+        raise ValueError("point_to_transform should have shape (n_points, 2)")
+    # From pixel space to reference space
+    transformed_pt = tf.matmul(point_to_transform, pix_to_ref_T[:-1, :-1], transpose_b=True)
+    # From reference space to scanner space
+    center_pt = tf.constant([[0.5, 0.5, 1.0]], dtype=tf.float32)  # Include homogeneous coordinate
+    center_pt_ref = tf.matmul(center_pt, sf_to_ref_T, transpose_b=True)
+    # Calculate ROI center translation compared to center
+    dx = center_xy[0] - center_pt_ref[0, 0]
+    dy = center_xy[1] - center_pt_ref[0, 1]
+    # Generate translation matrix
+    T_translate = tf.convert_to_tensor([[1, 0, dx],
+                                        [0, 1, dy],
+                                        [0, 0, 1]], dtype=tf.float32)
+    # Apply translation
+    ones = tf.ones((tf.shape(transformed_pt)[0], 1), dtype=tf.float32)
+    transformed_pt = tf.concat([transformed_pt, ones], axis=1)
+    points_in_scanfield = tf.matmul(transformed_pt, T_translate, transpose_b=True)[:, :2]
+    return points_in_scanfield

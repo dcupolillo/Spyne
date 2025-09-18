@@ -9,6 +9,9 @@ from .core.segmenter import DatasetSegmenter
 # Import plot submodule
 from . import plot
 
+# Import dataframe utility
+from .core.utils.dataframe import to_dataframe
+
 import sys
 from pathlib import Path
 
@@ -30,4 +33,4 @@ def showInfo():
 def help():
     """launch the spyne project page in a browser."""
     import webbrowser
-    webbrowser.open("http://github.com/dcupolillo/spyne", new=2)
+    webbrowser.open("http://github.com/dcupolillo/spyne/tree/stable", new=2)

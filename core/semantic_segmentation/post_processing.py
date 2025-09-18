@@ -5,8 +5,7 @@ import numpy as np
 from spyne.core.semantic_segmentation.utils import (
     threshold_prediction, remove_corner_joints,
     remove_distant_spines, remove_small_labels,
-    calculate_centroid)
-from spyne.core.utils.utils import transform
+    calculate_centroid, transform)
 from skimage import morphology
 from skimage.measure import label
 from skimage.feature import peak_local_max
@@ -21,9 +20,10 @@ def process_prediction(
         config: dict,
 ) -> tuple:
     """
-    This function processes raw neural network predictions to segment spines and
-    dendrites in a single region of interest (ROI). It applies thresholds,
-    morphological operations, and centroid calculations to refine the segmentation.
+    This function processes raw neural network predictions
+    to segment spines and dendrites in a single region of interest (ROI).
+    It applies thresholds, morphological operations,
+    and centroid calculations to refine the segmentation.
 
     Building block for process_predictions().
 
@@ -36,7 +36,8 @@ def process_prediction(
     dendrite_prediction : np.ndarray
         Neural network prediction array for dendrite segmentation.
     config : dict
-        Dictionary containing all configuration parameters required for processing:
+        Dictionary containing all configuration parameters
+            required for processing:
         - spine_threshold : float
             Threshold value for binarizing spine predictions.
         - dendrite_threshold : float
@@ -172,14 +173,15 @@ def process_prediction(
                 'roi_z': roi.roi_metadata['z'],
                 'centroid_pix': np.asarray(centroids[spine_n]),
                 'mask': spine,
+                'compartment': roi.roi_metadata['compartment'],
                 'branch_id': roi.roi_metadata['branch_id'],
                 'branch_degree': roi.roi_metadata['branch_degree'],
                 'spine_area_pix': np.sum(spine),
-                'spine_area_um': (
+                'spine_area_um': np.round((
                     np.sum(spine) *
                     roi.roi_metadata['resolution'][0] *
                     roi.roi_metadata['resolution'][1]
-                )
+                ), 2)
             }
 
     # Extract individual dendrites
@@ -211,7 +213,8 @@ def process_prediction(
             np.array(roi.affine),
             np.array(roi.pixel_to_ref_transform),
             roi.center_xy,
-            roi.pixel_resolution_xy))
+            # roi.pixel_resolution_xy
+            ))
 
     # Update dendrites dictionary with skeleton FOV coordinates
     for dendrite_n, node in enumerate(skel_coords_fov):
@@ -227,7 +230,8 @@ def process_prediction(
         np.array(roi.affine),
         np.array(roi.pixel_to_ref_transform),
         roi.center_xy,
-        roi.pixel_resolution_xy)
+        # roi.pixel_resolution_xy
+        )
 
     spines_dicts = [
         {
@@ -254,8 +258,9 @@ def process_predictions(
         config: dict,
 ) -> tuple:
     """
-    This function processes multiple predictions obtained from the neural network
-    to identify spines and dendrites for single or multiple regions of interest (ROIs).
+    This function processes multiple predictions obtained
+    from the neural network to identify spines and dendrites
+    for single or multiple regions of interest (ROIs).
     For each ROI, it applies segmentation refinement steps using
     process_prediction().
 

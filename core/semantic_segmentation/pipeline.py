@@ -2,6 +2,8 @@ from spyne.core.semantic_segmentation.inference import inference
 from spyne.core.semantic_segmentation.post_processing import (
     process_predictions)
 from spyne.core.semantic_segmentation.padding import pad_images
+from spyne.core.utils.spine_node import (
+    euclidean_distance, find_closest_node, distance_along_neurite, find_root)
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
@@ -97,7 +99,8 @@ def semantic_segmentation_pipeline(
     segmenter : object
         The RoiSegmenter object to process each ROI.
     config : dict
-        Configuration dictionary containing parameters for segmentation and inference.
+        Configuration dictionary containing parameters
+        for segmentation and inference.
 
         Expected keys:
         - device : str
@@ -140,6 +143,8 @@ def semantic_segmentation_pipeline(
     images = [None] * len(dataset)
     segmenters = [None] * len(dataset)
 
+    morph = dataset._morph
+
     # Step 1: Collect images and initialize RoiSegmenter instances
     with tf.device(config['device']):
 
@@ -148,7 +153,7 @@ def semantic_segmentation_pipeline(
                 desc="Collecting images",
                 total=len(dataset)):
 
-            roi_segmenter = segmenter[roi_index]  # RoiSegmenter instanc
+            roi_segmenter = segmenter[roi_index]  # RoiSegmenter instance
             segmenters[roi_index] = roi_segmenter
             images[roi_index] = roi_segmenter.get_base_image()
 
@@ -163,7 +168,7 @@ def semantic_segmentation_pipeline(
         original_dimensions,
         config
     )
-    
+
     spines_data, dendrites_data = processed_predictions
     spine_predictions, dendrite_predictions = raw_predictions
 
@@ -171,8 +176,44 @@ def semantic_segmentation_pipeline(
     spines_data = list(chain.from_iterable(spines_data))
     dendrites_data = list(chain.from_iterable(dendrites_data))
 
-    # Add an overall spine_index key to the list
+    # Add an overall spine_index key and other metadata to the list
     for i, spine_dict in enumerate(spines_data):
         spine_dict['spine_index'] = i
 
-    return segmenters, spines_data, dendrites_data, spine_predictions, dendrite_predictions
+        closest_node_id = find_closest_node(spine_dict, morph.neuron)
+        root_node_id = find_root(morph.neuron, closest_node_id)
+
+        closest_node_index = closest_node_id - 1
+        closest_node = morph.neuron[closest_node_index]
+        root_node_index = root_node_id - 1
+
+        distance_from_root = distance_along_neurite(
+            morph.neuron,
+            closest_node_index,
+            root_node_index
+        )
+
+        spine_position = (
+            spine_dict["centroid_fov_um"][0],
+            spine_dict["centroid_fov_um"][1],
+            spine_dict["roi_z"])
+
+        closest_node_position = (
+            closest_node.x, closest_node.y, closest_node.z)
+
+        distance_from_shaft = euclidean_distance(
+            spine_position,
+            closest_node_position
+            )
+
+        spine_dict['distance_from_root'] = distance_from_root
+        spine_dict['root_node_id'] = root_node_id
+        spine_dict['closest_node_id'] = closest_node_id
+        spine_dict['distance_from_shaft'] = distance_from_shaft
+
+    return (
+        segmenters,
+        spines_data,
+        dendrites_data,
+        spine_predictions,
+        dendrite_predictions)

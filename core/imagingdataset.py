@@ -30,10 +30,12 @@ class ImagingDataset:
 
     Note
     ----
-    The median filter kernel size is specified as (spatial_x, spatial_y, temporal)
-    where spatial values are radii in micrometers and temporal is kernel size in frames.
-    Larger kernel sizes will significantly increase loading time. Default (0.3, 0.3, 3) 
-    provides minimal noise reduction with fast processing time.
+    The median filter kernel size is specified as
+    (spatial_x, spatial_y, temporal) where spatial values are radii
+    in micrometers and temporal is kernel size in frames.
+    Larger kernel sizes will significantly increase loading time.
+    Default (0.3, 0.3, 3) provides minimal noise reduction
+    with fast processing time.
 
     Example
     -------
@@ -50,7 +52,8 @@ class ImagingDataset:
             self,
             folder: str or Path,
             kernel_size_um: tuple = (0.3, 0.3, 3),
-            pmt_artifact_detection_threshold: int = 3
+            pmt_artifact_detection_threshold: int = 3,
+            lazy_load: bool = False,
     ) -> None:
         """
         Initialize the ImagingDataset.
@@ -60,14 +63,20 @@ class ImagingDataset:
         paths : NeuronPath
             Path manager containing paths to imaging and associated files.
         kernel_size_um : tuple, optional
-            Size of the 3D median filter kernel as (spatial_x, spatial_y, temporal).
-            First two values are spatial filter radii in micrometers (converted to 
-            pixel diameters), third value is temporal kernel size in frames. 
+            Size of the 3D median filter kernel as
+            (spatial_x, spatial_y, temporal).
+            First two values are spatial filter radii in micrometers
+            (converted to pixel diameters), third value is
+            temporal kernel size in frames.
             Default is (0.3, 0.3, 3) for light filtering.
         pmt_artifact_detection_threshold : int, optional
-            Multiplicative factor for PMT artifact detection threshold. 
-            Higher values are more conservative in detecting artifacts. 
+            Multiplicative factor for PMT artifact detection threshold.
+            Higher values are more conservative in detecting artifacts.
             Default is 3.
+        lazy_load : bool, optional
+            If True, only loads metadata.
+            If False, loads and processes the imaging data
+            upon initialization. Default is False.
 
         Raises
         ------
@@ -92,15 +101,16 @@ class ImagingDataset:
 
         if not len(kernel_size_um) == 3:
             raise Exception("kernel_size_um must be of size 3.")
-        
+
         if not isinstance(pmt_artifact_detection_threshold, int):
             raise TypeError(
                 "'pmt_artifact_detection_threshold' must be an integer.")
-        
+
         self.folder = Path(folder)
         self.parent_folder = folder.parent
 
-        _, self.date, self.cell_number, _ = self.folder.parts
+        # safe for both absolute and relative paths
+        self.date, self.cell_number, _ = self.folder.parts[-3:]
         self.name = f"{self.date}_{self.cell_number}"
 
         self.file_list = [
@@ -110,15 +120,16 @@ class ImagingDataset:
         self.abf_file_list = [
             file_path for file_path in folder.rglob('*')
             if file_path.suffix.lower() == ".abf"]
-        
+
         if not self.file_list:
             raise Exception(f"No imaging files found in {folder}.")
-        
+
         if not self.abf_file_list:
             raise Exception(f"No ABF files found in {folder}.")
 
         self.median_filter_kernel_size_um = kernel_size_um
-        self.pmt_artifact_detection_threshold = pmt_artifact_detection_threshold
+        self.pmt_artifact_detection_threshold = (
+            pmt_artifact_detection_threshold)
 
         stack_file = next(
             (f for f in folder.parent.glob('**/*')
@@ -134,7 +145,31 @@ class ImagingDataset:
         self._sf = rp.Scanfields(self._morph)
 
         self.metadata = self._load_metadata()
-        self.data = self._load_data()
+
+        # Lazy load data
+        self._data = None if lazy_load else self._load_data()
+
+    @property
+    def data(self):
+        """
+        Imaging data for all ROIs.
+
+        Raises
+        ------
+        ValueError
+            If data is not loaded. Use load_data() after initialization.
+
+        Returns
+        -------
+        list
+            List of processed imaging data arrays.
+        """
+        if self._data is None:
+            raise ValueError(
+                "Data not loaded. Set 'load_data=True' when initializing "
+                "ImagingDataset, or call .load_data().")
+
+        return self._data
 
     def _load_metadata(self):
         """
@@ -155,9 +190,23 @@ class ImagingDataset:
 
         return metadata
 
+    def load_data(self) -> None:
+        """
+        Public method to load and process imaging data after initialization.
+
+        This method allows you to load imaging data if the dataset was
+        initialized with load_data=False. After calling, the .data property
+        will be available.
+
+        Returns
+        -------
+        None
+        """
+        self._data = self._load_data()
+
     def _load_data(self):
         """
-        Load and process imaging data.
+        Private method to load and process imaging data.
 
         Uses load_imaging_data_from_tiff() function
         to load the raw .tiff data and perform some
@@ -459,12 +508,13 @@ class Sweep:
         Parameters
         ----------
         channel_index : int
-            Index of the channel to retrieve (0-based, based on saved channels).
+            Index of the channel to retrieve
+            (0-based, based on saved channels).
 
         Returns
         -------
         Channel
-            A `Channel` object containing the data and metadata for the 
+            A `Channel` object containing the data and metadata for the
             specified channel.
 
         Raises
@@ -474,13 +524,13 @@ class Sweep:
         """
         ch_active = self.roi_metadata['ch_active']
         n_saved_channels = len(ch_active)
-        
+
         if channel_index >= n_saved_channels:
             raise IndexError(
                 f"Channel {channel_index} out of range. "
                 f"Available saved channels: 0-{n_saved_channels-1} "
                 f"(corresponding to hardware channels {ch_active})")
-        
+
         channel_data = self.sweep[:, channel_index, :, :]
 
         return Channel(
@@ -491,12 +541,13 @@ class Sweep:
     def __getitem__(self, channel_index: int) -> Channel:
         """
         Enable indexing syntax for channel access.
-        
+
         Parameters
         ----------
         channel_index : int
-            Index of the channel to retrieve (0-based, based on saved channels).
-            
+            Index of the channel to retrieve
+            (0-based, based on saved channels).
+
         Returns
         -------
         Channel
@@ -513,9 +564,11 @@ class Sweep:
         -------
         dict
             Dictionary with channel information including:
-            - 'active': list of hardware channel numbers that were active (1-based)
+            - 'active': list of hardware channel numbers that were active
+                (1-based)
             - 'saved': number of channels actually saved in the data
-            - 'mapping': mapping from saved index (0-based) to hardware channel number (1-based)
+            - 'mapping': mapping from saved index (0-based)
+                to hardware channel number (1-based)
         """
         ch_active = self.roi_metadata['ch_active']
         return {
@@ -527,25 +580,29 @@ class Sweep:
     @property
     def ch1(self) -> Channel:
         """
-        Access first saved channel data (convenience property for backward compatibility).
+        Access first saved channel data
+        (convenience property for backward compatibility).
 
         Returns
         -------
         Channel
-            A `Channel` object containing the data and metadata for the first saved channel.
+            A `Channel` object containing the data and metadata
+            for the first saved channel.
         """
         return self.get_channel(0)
 
     @property
     def ch2(self) -> Channel:
         """
-        Access second saved channel data (convenience property for backward compatibility).
+        Access second saved channel data
+        (convenience propertyfor backward compatibility).
 
         Returns
         -------
         Channel
-            A `Channel` object containing the data and metadata for the second saved channel.
-            
+            A `Channel` object containing the data and metadata
+            for the second saved channel.
+
         Raises
         ------
         IndexError
@@ -870,9 +927,11 @@ class Frame:
         Parameters
         ----------
         output_file : str or Path, optional
-            Path to save the frame. If None, saves with the frame's default filename.
+            Path to save the frame. If None, saves with the frame's
+            default filename.
         data_type : str, optional
-            Data type to save the frame as. Default is None (uses original data type).
+            Data type to save the frame as.
+            Default is None(uses original data type).
         norm : tuple or list or np.ndarray, optional
             Normalization range as [min, max]. Default is None.
 

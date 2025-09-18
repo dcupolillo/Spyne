@@ -9,7 +9,10 @@ cell_n = "cell0001"
 data_folder = Path("data")
 imaging_folder = data_folder / date / cell_n / "neuron"
 
-# Initialize the dataset and segmenter to identify spines
+# ======================
+# Dataset initialization
+# ======================
+
 dataset = spyne.ImagingDataset(imaging_folder)
 ephy = spyne.EphyDataset(dataset)
 segmenter = spyne.DatasetSegmenter(dataset)
@@ -36,3 +39,23 @@ segmenter.collect_all_data()
 
 # Work on single roi after data collection
 segmented_roi = segmenter[0]
+
+# ================
+# Plotting example
+# ================
+
+import spyne.plot as plt_spyne
+
+# Plot all spine 2D position
+plt_spyne.scatter(segmenter.spines_data)
+
+# Plot BLA-activated spines
+plt_spyne.scatter_event(
+    segmenter.spines_data,
+    segmenter.calcium_events_binary_BLA)
+
+# Traces heatmap
+plt_spyne.heatmap(
+    segmenter.dFF_BLA,
+    segmenter.ts_BLA,
+    segmenter.calcium_events_binary_BLA)

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from pathlib import Path
 from tqdm import tqdm
 import tifffile
 import numpy as np
 from skimage.util import img_as_uint
 from scipy.ndimage import median_filter
 from spyne.core.utils.pyabf_adc import get_digital_output_list
-from spyne.core.utils.movie_utils import rows_deviation, modify_frames
+from spyne.core.utils.movie_utils import (
+    modify_frames, collect_deviating_rows_for_channels)
 from spyne.core.utils.denoise import radius_to_kernel_size
 
 from typing import TYPE_CHECKING
@@ -234,6 +236,7 @@ def load_metadata_from_tiff(
                 # Take ROIpy.Scanfields.Roi specific metadata
                 branch_degree = roi_in_scanfield_object.branch_degree
                 branch_id = roi_in_scanfield_object.branch_id
+                compartment = roi_in_scanfield_object.compartment
 
                 # Use ROIpy UUIDs instead of ScanImage UUIDs
                 # for better correspondence
@@ -242,6 +245,7 @@ def load_metadata_from_tiff(
 
                 # Write the metadata entry
                 metadata.append({
+                    'dtype': frame_data["SI.hScan2D.channelsDataType"],
                     'objective resolution': objective_resolution,
                     'affine': scanfield['affine'],
                     'translate': translate,
@@ -259,6 +263,7 @@ def load_metadata_from_tiff(
                     'z': z,
                     'z_ind': file_n,
                     'n_roi': n_roi_overall,
+                    'compartment': compartment,
                     'branch_degree': branch_degree,
                     'branch_id': branch_id,
                     'n_sweeps': dataset_instance.n_sweeps[file_n],
@@ -314,29 +319,27 @@ def load_metadata_from_tiff(
     return n_roi_overalls, output_metadata
 
 
-def load_imaging_data_from_tiff(
-        dataset_instance: ImagingDataset,
+def preprocess_tiff_file(
+        file_path: Path,
+        file_metadata: dict,
 ) -> np.ndarray:
     """
-    Load and preprocess calcium imaging data from ScanImage TIFF files.
+    Process a single TIFF file: load, correct artifacts, apply median filter.
 
-    This function loads raw imaging data, corrects PMT gating artifacts
-    (black stripes), and applies 3D median filtering for noise reduction.
     It processes each active channel independently and uses pre-calculated
     filter parameters from metadata for optimal performance.
 
     Parameters
     ----------
-    dataset_instance : ImagingDataset
-        Dataset instance containing file_list, metadata, and 
-        median_filter_kernel_size_um attributes.
+    file_path : Path
+        Path to the raw TIFF file.
+    file_metadata : dict
+        Metadata for this file.
 
     Returns
     -------
     np.ndarray
-        List of processed 4D arrays, one per file, with shape
-        (n_frames, n_channels, height, width). Each array contains
-        filtered calcium imaging data with PMT artifacts corrected.
+        The processed 4D array for this file.
 
     Notes
     -----
@@ -347,6 +350,60 @@ def load_imaging_data_from_tiff(
     - Filter kernel dimensions: (temporal, height, width)
     - Uses 'wrap' mode for boundary handling in median filter
     """
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+
+    raw_frames = tifffile.imread(file_path)
+    frames = raw_frames.copy()
+
+    active_channels = [ch - 1 for ch in file_metadata['ch_active']]
+    
+    pmt_artifact_detection_threshold = file_metadata.get(
+        'pmt_artifact_detection_threshold', 3)
+    
+    sorted_deviating_rows = collect_deviating_rows_for_channels(
+        frames, active_channels,
+        threshold_factor=pmt_artifact_detection_threshold
+    )
+    
+    modified_frames = modify_frames(frames, sorted_deviating_rows)
+    
+    kernel_size_pixels = file_metadata['median_filter_kernel_size_px']
+
+    processed_frames = modified_frames.copy()
+
+    for channel_idx in active_channels:
+        processed_frames[:, channel_idx, :, :] = median_filter(
+            processed_frames[:, channel_idx, :, :],
+            size=kernel_size_pixels,
+            mode='wrap')
+
+    return processed_frames
+
+
+def load_imaging_data_from_tiff(
+        dataset_instance: ImagingDataset,
+) -> list:
+    """
+    Load and preprocess calcium imaging data from ScanImage TIFF files.
+
+    This function relies on preprocess_tiff_file() to handle
+    raw imaging data, PMT gating artifacts correction (black stripes)
+    and 3D median filtering for noise reduction.
+
+    Parameters
+    ----------
+    dataset_instance : ImagingDataset
+        Dataset instance containing file_list, metadata, and 
+        median_filter_kernel_size_um attributes.
+
+    Returns
+    -------
+    list
+        List of processed 4D arrays, one per file, with shape
+        (n_frames, n_channels, height, width). Each array contains
+        filtered calcium imaging data with PMT artifacts corrected.
+    """
 
     data = [None] * len(dataset_instance.file_list)
 
@@ -355,71 +412,19 @@ def load_imaging_data_from_tiff(
 
     for n, file_path in enumerate(tqdm(
             dataset_instance.file_list, desc="Loading data")):
+        try:
+            roi_index = file_to_roi_map[file_path]
+            file_metadata = dataset_instance.metadata[roi_index]
 
-        # raw data are dtype signed int16
-        raw_frames = tifffile.imread(file_path)
-        frames = raw_frames.copy()
-
-        # Negative values clipped as 0
-        # FIXME: fix the range
-        # frames = img_as_uint(frames)
-
-        # Get metadata for this file using the pre-computed mapping
-        roi_index = file_to_roi_map[file_path]
-        file_metadata = dataset_instance.metadata[roi_index]
-
-        # Get active channels from metadata
-        # and convert to 0-indexed
-        active_channels = [ch - 1 for ch in file_metadata['ch_active']]
-
-        # Correct gating-PMT black stripe
-        # Detect deviating rows for each active channel
-        pmt_artifact_detection_threshold = (
-            file_metadata.get('pmt_artifact_detection_threshold', 3))
+            processed = preprocess_tiff_file(
+                file_path=Path(file_path),
+                file_metadata=file_metadata)
+            # Ensure dtype is int16
+            processed = processed.astype(np.int16)
+            data[n] = processed
         
-        channel_deviations = {}
-        for channel_idx in active_channels:
-            channel_deviations[channel_idx] = rows_deviation(
-                frames[:, channel_idx, :, :],
-                threshold_factor=pmt_artifact_detection_threshold,
-                plot=False)
-
-        # Combine deviating rows from all active channels
-        deviating_rows = {}
-        all_frames = set()
-        for channel_deviation in channel_deviations.values():
-            all_frames.update(channel_deviation.keys())
-
-        for frame in all_frames:
-            rows_for_frame = []
-            for channel_deviation in channel_deviations.values():
-                rows_for_frame.extend(channel_deviation.get(frame, []))
-            deviating_rows[frame] = sorted(set(rows_for_frame))
-
-        sorted_deviating_rows = dict(sorted(deviating_rows.items()))
-
-        consecutive_deviating_rows = {}
-        frame_numbers = list(sorted_deviating_rows.keys())
-
-        for frame_number in frame_numbers:
-            consecutive_deviating_rows[frame_number] = (
-                sorted_deviating_rows[frame_number])
-
-        modified_frames = modify_frames(
-            frames, consecutive_deviating_rows)
-
-        # Use pre-calculated pixel kernel size from metadata
-        kernel_size_pixels = file_metadata['median_filter_kernel_size_px']
-
-        # Apply 3D median filter to each active channel
-        filtered_frames = modified_frames.copy()
-        for channel_idx in active_channels:
-            filtered_frames[:, channel_idx, :, :] = median_filter(
-                filtered_frames[:, channel_idx, :, :],
-                size=kernel_size_pixels,
-                mode='wrap')
-
-        data[n] = filtered_frames
+        except Exception as e:
+            print(f"Error processing {file_path}: {e}")
 
     return data
 

@@ -6,8 +6,7 @@ import numpy as np
 from pathlib import Path
 import matplotlib.pyplot as plt
 from tqdm import tqdm
-from spyne.neuralnetwork.spine_segmentation.spine_segmentation import (
-    calculate_centroid)
+from spyne.core.semantic_segmentation.utils import calculate_centroid
 
 
 def _format_axes(
