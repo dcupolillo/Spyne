@@ -7,40 +7,6 @@ import tensorflow_probability as tfp
 from spyne.core.utils.filters import modified_okada_filter
 
 
-def rolling_quantile(
-        array: tf.Tensor,
-        window: int,
-        min_quantile: float
-) -> tf.Tensor:
-    """
-    Calculate the specified quantile for the given array.
-
-    Parameters
-    ----------
-    array : tf.Tensor
-        The input array for which the quantile needs to be calculated.
-    window : int
-        The size of the window for the rolling operation. This parameter is
-        present but not directly used in this function.
-    min_quantile : float
-        The quantile to compute. For example, a `min_quantile` of 50 would
-        compute the median.
-
-    Returns
-    -------
-    tf.Tensor
-        The calculated quantile for the input array.
-    """
-
-    # Cast to a float32
-    array = tf.cast(array, tf.float32)
-
-    # Compute the specified percentile using TensorFlow Probability
-    q = tfp.stats.percentile(array, min_quantile, interpolation='linear')
-
-    return q
-
-
 def dFF(
         n_frames: int,
         roi: np.ndarray,
