@@ -84,6 +84,30 @@ def add_hscalebar(
         legend_offset: float = 0.1,
         **kwargs
 ) -> None:
+    """
+    Add a horizontal scale bar to a matplotlib Axes.
+
+    Parameters
+    ----------
+    x_start : float
+        The starting x-coordinate of the scale bar.
+    x_length : float
+        The length of the scale bar.
+    y_position : float
+        The y-coordinate where the scale bar will be placed.
+    ax : plt.Axes
+        The matplotlib Axes to which the scale bar will be added.
+    legend : str, optional
+        Text to display above or below the scale bar. Default is None.
+    legend_offset : float, optional
+        Vertical offset for the legend text. Positive values place the text
+        above the scale bar, negative values place it below. Default is 0.1.
+    **kwargs
+        Additional arguments passed to ax.hlines.
+        Common options include:
+        - color : color of the scale bar (default: 'black')
+        - linewidth or lw : thickness of the scale bar (default: 2)
+    """
 
     default_kwargs = {
         "color": "black",
@@ -118,6 +142,30 @@ def add_vscalebar(
         legend_offset: float = 0.1,
         **kwargs
 ) -> None:
+    """
+    Add a vertical scale bar to a matplotlib Axes.
+    Parameters
+    ----------
+    y_start : float
+        The starting y-coordinate of the scale bar.
+    y_length : float
+        The length of the scale bar.
+    x_position : float
+        The x-coordinate where the scale bar will be placed.
+    ax : plt.Axes
+        The matplotlib Axes to which the scale bar will be added.
+    legend : str, optional
+        Text to display beside the scale bar. Default is None.
+    legend_offset : float, optional
+        Horizontal offset for the legend text. Positive values place the text
+        to the right of the scale bar, negative values place it to the left.
+        Default is 0.1.
+    **kwargs
+        Additional arguments passed to ax.vlines.
+        Common options include:
+        - color : color of the scale bar (default: 'black')
+        - linewidth or lw : thickness of the scale bar (default: 2)
+    """
 
     default_kwargs = {
         "color": "black",
@@ -372,7 +420,6 @@ def scatter_events(
 
 def masks(
         roi_segmenter,
-        image_cmap: str = 'binary_r',
         spines_cmap: str = 'gist_rainbow',
         spine_mask_alpha: float = 0.5,
         enum: bool = True,
@@ -395,8 +442,6 @@ def masks(
         The ROI segmenter instance containing spine masks and base image.
         Must have attributes: spines (iterable with mask and centroid_pix),
         base_image (2D array), and n_spines (int).
-    image_cmap : str, optional
-        Colormap for base image. Default is 'binary_r'.
     spines_cmap : str, optional
         Colormap for spine masks. Default is 'gist_rainbow'.
     spine_mask_alpha : float, optional
@@ -410,9 +455,8 @@ def masks(
     imshow_kwargs : dict, optional
         Additional arguments passed to ax.imshow for base image.
         Common options include:
+        - cmap : colormap for base image (default: 'binary_r')
         - interpolation : image interpolation method
-        - aspect : aspect ratio control
-        - alpha : image transparency
     scatter_kwargs : dict, optional
         Additional arguments passed to scatter plot for centroids.
         Common options include:
@@ -438,9 +482,27 @@ def masks(
         The matplotlib axes with the plotted spine masks.
     """
 
-    imshow_kwargs = {} if imshow_kwargs is None else imshow_kwargs
-    scatter_kwargs = {} if scatter_kwargs is None else scatter_kwargs
-    text_kwargs = {} if text_kwargs is None else text_kwargs
+    imshow_default_kwargs = {
+        "cmap": "binary_r",
+        "interpolation": "none",
+    }
+    scatter_default_kwargs = {
+        "s": 50,
+        "edgecolors": "k",
+        "linewidths": 0.5,
+        "zorder": 3,
+    }
+    text_default_kwargs = {
+        "fontsize": 12,
+        "fontweight": "bold",
+        "bbox": dict(facecolor='white', alpha=0.6, edgecolor='none', pad=1),
+        "zorder": 4,
+    }
+
+    # User provided override deault kwargs
+    imshow_kwargs = {**imshow_default_kwargs, **(imshow_kwargs or {})}
+    scatter_kwargs = {**scatter_default_kwargs, **(scatter_kwargs or {})}
+    text_kwargs = {**text_default_kwargs, **(text_kwargs or {})}
 
     if ax is None:
         fig, ax = plt.subplots(layout="constrained")
@@ -450,7 +512,7 @@ def masks(
     ax.set_aspect('equal')
 
     # Display base image
-    ax.imshow(roi_segmenter.base_image, cmap=image_cmap, **imshow_kwargs)
+    ax.imshow(roi_segmenter.base_image, **imshow_kwargs)
 
     # Get colormap for spines
     cmap = plt.get_cmap(spines_cmap, roi_segmenter.n_spines)

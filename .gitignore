@@ -131,3 +131,4 @@ analysis/
 neuralnetwork/spine_segmentation/bayesian_search
 neuralnetwork/IoU
 data/
+display/
