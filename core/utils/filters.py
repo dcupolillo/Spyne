@@ -4,10 +4,12 @@
 import numpy as np
 import tensorflow as tf
 import cv2
-from typing import Union, Tuple
 
 
-def median(image, kernel: int):
+def median(
+        image: np.ndarray,
+        kernel: int
+) -> np.ndarray:
     """
     Image filtering.
 
@@ -40,7 +42,11 @@ def median(image, kernel: int):
     return cv2.medianBlur(image, kernel)
 
 
-def gaussian(image, kernel: int, sigma: float) -> np.ndarray:
+def gaussian(
+        image: np.ndarray,
+        kernel: int,
+        sigma: float
+) -> np.ndarray:
     """
     Gaussian filter implementation.
 
@@ -66,57 +72,8 @@ def gaussian(image, kernel: int, sigma: float) -> np.ndarray:
     return cv2.GaussianBlur(image, (kernel, kernel), sigma)
 
 
-# def modified_okada_filter(
-#         time_series: Union[np.ndarray, cp.ndarray],
-# ) -> Union[np.ndarray, cp.ndarray]:
-#     """
-#     Trace filtering.
-#     Ishikawa et al.,
-#     "Functional Multiple-Spine Calcium Imaging from Brain Slices"
-#     STAR Protocols (2020), https://doi.org/10.1016/j.xpro.2020.100121
-#     Figure 8
-
-#     Parameters
-#     ----------
-#     time_series : np.ndarray or cp.ndarray
-#         The input dFF trace.
-#     use_gpu : bool
-#         Whether to use GPU acceleration with cupy.
-
-#     Returns
-#     -------
-#     filtered_series : np.ndarray or cp.ndarray
-#         Filtered dFF trace.
-#     """
-
-#     filtered_series = np.copy(time_series)
-#     n_points = len(time_series)
-
-#     # Calculate mean and standard deviation of the entire time series
-#     mean = np.mean(time_series)
-#     st_dev = np.std(time_series)
-
-#     for t in range(1, n_points - 1):
-
-#         xt = time_series[t]
-#         xt_minus_1 = time_series[t - 1]
-#         xt_plus_1 = time_series[t + 1]
-
-#         # Z is defined as signal saliency against background noise
-#         Z = np.abs((xt_plus_1 - mean) / st_dev)
-
-#         # Check if xt is the median
-#         if (xt - xt_minus_1) * (xt - xt_plus_1) > 0:
-#             filtered_series[t] = (xt_minus_1 + Z * xt + xt_plus_1) / (2 + Z)
-
-#     return filtered_series
-
 def condition(
         t: tf.Tensor,
-        filtered_series: tf.Tensor,
-        time_series: tf.Tensor,
-        mean: tf.Tensor,
-        st_dev: tf.Tensor,
         n_points: tf.Tensor
 ) -> tf.Tensor:
     """
@@ -126,14 +83,6 @@ def condition(
     ----------
     t : tf.Tensor
         The current time point in the loop.
-    filtered_series : tf.Tensor
-        The filtered time series.
-    time_series : tf.Tensor
-        The original time series.
-    mean : tf.Tensor
-        The mean of the time series.
-    st_dev : tf.Tensor
-        The standard deviation of the time series.
     n_points : tf.Tensor
         The number of points in the time series.
 
@@ -150,7 +99,7 @@ def body(
         filtered_series: tf.Tensor,
         time_series: tf.Tensor,
         mean: tf.Tensor, st_dev: tf.Tensor,
-) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+) -> tuple:
     """
     Body of the TensorFlow while loop.
 
@@ -169,7 +118,7 @@ def body(
 
     Returns
     -------
-    Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]
+    tuple
         The updated time point and filtered series.
     """
     xt = time_series[t]
@@ -222,8 +171,8 @@ def modified_okada_filter(
     t = tf.constant(1)
     loop_vars = [t, filtered_series, time_series, mean, st_dev]
     t, filtered_series, _, _, _ = tf.while_loop(
-        lambda t, filtered_series, time_series, mean, st_dev:
-            condition(t, filtered_series, time_series, mean, st_dev, n_points),
+        lambda t:
+            condition(t, n_points),
         lambda t, filtered_series, time_series, mean, st_dev:
             body(t, filtered_series, time_series, mean, st_dev),
         loop_vars
