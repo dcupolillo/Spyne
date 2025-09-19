@@ -173,9 +173,9 @@ def process_prediction(
                 'roi_z': roi.roi_metadata['z'],
                 'centroid_pix': np.asarray(centroids[spine_n]),
                 'mask': spine,
-                'compartment': roi.roi_metadata['compartment'],
                 'branch_id': roi.roi_metadata['branch_id'],
                 'branch_degree': roi.roi_metadata['branch_degree'],
+                'compartment': roi.roi_metadata['compartment'],
                 'spine_area_pix': np.sum(spine),
                 'spine_area_um': np.round((
                     np.sum(spine) *
