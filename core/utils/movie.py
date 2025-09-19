@@ -1,8 +1,6 @@
 """ Created on Wed Sep  6 11:31:57 2023
     @author: dcupolillo """
 
-
-
 from pathlib import Path
 from typing import Union, Optional
 import cv2
