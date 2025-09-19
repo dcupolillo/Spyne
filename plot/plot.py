@@ -1013,3 +1013,66 @@ def dendrogram(
     )
     ax.spines[['top', 'right', 'left']].set_visible(False)
     ax.tick_params(axis='y', length=0)
+
+
+def rotate_spines(
+        spine_list: list,
+        translation: tuple,
+        angle: float,
+        objective_resolution: float,
+) -> list:
+    """
+    Aligns spines along a specified direction by translating and rotating
+    their centroids based on the branch orientation.
+
+    Parameters
+    ----------
+    branch : list
+        List of nodes representing the branch structure.
+    spines : list
+        List of spine dictionaries containing 'centroid_fov'.
+    direction : str
+        Direction to align ('horizontal' or 'vertical').
+    objective_resolution : float
+        Conversion factor from scan angle degrees to micrometers.
+
+    Returns
+    -------
+    list
+        List of transformed spines with updated 'centroid_fov' and
+        'centroid_fov_um' coordinates.
+    """
+
+    translation_x, translation_y = translation
+
+    # Compute rotation matrix (using numpy)
+    cos_theta = np.cos(-angle)
+    sin_theta = np.sin(-angle)
+    rotation_matrix = np.array(
+        [[cos_theta, -sin_theta], [sin_theta, cos_theta]])
+
+    # Create new dictionaries for each spine
+    # preventing unwanted in-place mutations
+    spine_list_copy = [{**spine} for spine in spine_list]
+
+    # Transform each spine
+    for spine in spine_list_copy:
+        centroid_x, centroid_y = spine['centroid_fov_um'][:2]
+
+        # Apply translation first
+        translated_coords = np.array(
+            [centroid_x + translation_x, centroid_y + translation_y])
+
+        # Apply rotation
+        rotated_coords = rotation_matrix.dot(translated_coords)
+
+        # Update spine dictionary
+        spine['centroid_fov_um'] = [
+            round(rotated_coords[0], 6),
+            round(rotated_coords[1], 6)]
+        spine['centroid_fov'] = [
+            spine['centroid_fov_um'][0] / objective_resolution,
+            spine['centroid_fov_um'][1] / objective_resolution
+        ]
+
+    return spine_list_copy
