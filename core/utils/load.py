@@ -7,7 +7,7 @@ import numpy as np
 from skimage.util import img_as_uint
 from scipy.ndimage import median_filter
 from spyne.core.utils.pyabf_adc import get_digital_output_list
-from spyne.core.utils.movie_utils import (
+from spyne.core.utils.correct_pmt_gating import (
     modify_frames, collect_deviating_rows_for_channels)
 from spyne.core.utils.denoise import radius_to_kernel_size
 

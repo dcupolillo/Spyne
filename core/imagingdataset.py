@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from functools import cache
 import ROIpy as rp
-from spyne.display.plot_frames import (
+from spyne.core.utils.movie import (
     animate_frames, save_frames, save_single_frame)
 from spyne.core.utils.filters import median, gaussian
 from spyne.core.utils.load import (
