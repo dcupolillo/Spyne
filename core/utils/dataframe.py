@@ -205,17 +205,17 @@ def add_spine_active_column(
     if not isinstance(n_events_threshold, int) or n_events_threshold < 1:
         raise ValueError("n_events_threshold must be a positive integer.")
 
-    for spine_n in dataframe.index:
-
-        is_active = sum(prediction_binary[spine_n]) > n_events_threshold
-        dataframe.loc[spine_n, f'is_{input_identity}'] = is_active
+    event_counts = prediction_binary.sum(axis=1)
+    is_active = event_counts > n_events_threshold
+    dataframe[f'is_{input_identity}'] = is_active
 
     return dataframe
 
 
 def randomize_identity_column(
         dataframe: pd.DataFrame,
-        input_identity: str
+        input_identity: str,
+        seed: int = 42
 ) -> pd.DataFrame:
     """
     Randomly shuffle the boolean values in the 'is_{input_identity}' column
@@ -226,6 +226,8 @@ def randomize_identity_column(
         DataFrame containing spine information with 'branch_id' column.
     input_identity : str
         Identifier for the type of input ('BLA' or 'CA3').
+    seed : int, optional
+        Random seed for reproducibility (default is 42).
     Returns:
     -------
     pd.DataFrame
@@ -249,10 +251,12 @@ def randomize_identity_column(
         raise ValueError(
             f"DataFrame must contain 'is_{input_identity}' column.")
     
+    np.random.seed(seed)
+    
     grouped = dataframe.groupby('branch_id')
 
-    for branch_id, group in grouped:
-        # Randomly assign identity within each branch
+    for _, group in grouped:
+        
         identities = group[f'is_{input_identity}'].values
         np.random.shuffle(identities)
         dataframe.loc[group.index, f'is_{input_identity}'] = identities
@@ -301,9 +305,7 @@ def add_nearest_neighbor_distance_column(
     # Group spines by branch_id
     grouped = dataframe_by_input.groupby('branch_id')
 
-    for branch_id, branch_df in grouped:
-
-        # Get spine indices and closest_node_ids for this branch
+    for _, branch_df in grouped:
         spine_indices = branch_df.index.to_list()
         node_ids = branch_df['closest_node_id'].to_list()
         n = len(spine_indices)
@@ -316,34 +318,25 @@ def add_nearest_neighbor_distance_column(
             ] = np.nan
             continue
 
-        # Build distance matrix (n x n)
-        dist_matrix = np.full((n, n), np.nan)
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    dist_matrix[i, j] = distance_along_neurite(
-                        nodes_list,
-                        node_ids[i],
-                        node_ids[j]
-                    )
-
-        # For each spine, set NND as the minimum nonzero value in its row
+        # For each spine, compute minimum distance to any other spine
+        # (excluding self and zero)
         for i, idx in enumerate(spine_indices):
-            # Exclude self (diagonal is nan)
-            row_dists = dist_matrix[i, :]
-            # Only consider non-nan, nonzero distances
-            valid = row_dists[~np.isnan(row_dists)]
-            if valid.size == 0:
-                dataframe.loc[
-                    idx,
-                    f'nearest_neighbor_distance_{input_identity}'
-                ] = np.nan
+            
+            min_dist = np.inf
 
-            else:
-                dataframe.loc[
-                    idx,
-                    f'nearest_neighbor_distance_{input_identity}'
-                ] = valid.min()
+            for j in range(len(spine_indices)):
+                if i == j:
+                    continue
+                
+                d = distance_along_neurite(nodes_list, node_ids[i], node_ids[j])
+                
+                if d > 0 and d < min_dist:
+                    min_dist = d
+            
+            dataframe.loc[
+                idx,
+                f'nearest_neighbor_distance_{input_identity}'
+            ] = min_dist if min_dist != np.inf else np.nan
 
     return dataframe
 
@@ -391,9 +384,8 @@ def add_consecutive_neighbor_distance_column(
     # Group spines by branch_id
     grouped = dataframe_by_input.groupby('branch_id')
 
-    for branch_id, branch_df in grouped:
+    for _, branch_df in grouped:
         node_map = {node.id: node for node in nodes_list}
-        # Compute distance from soma for each spine in this branch
         branch_df = branch_df.copy()
         branch_df['distance_from_soma'] = branch_df['closest_node_id'].apply(
             lambda nid: path_distance(
@@ -402,8 +394,6 @@ def add_consecutive_neighbor_distance_column(
                 stop_node_id=path[-1]
             )
         )
-
-        # Sort only by closest_node_id (assumed to increase outward from soma)
         branch_df = branch_df.sort_values('closest_node_id')
         spine_indices = branch_df.index.to_list()
         node_ids = branch_df['closest_node_id'].to_list()
@@ -416,47 +406,20 @@ def add_consecutive_neighbor_distance_column(
             ] = np.nan
             continue
 
-        # Build distance matrix (n x n)
-        dist_matrix = np.full((n, n), np.nan)
-        for i in range(n):
-            for j in range(n):
-                if i != j:
-                    dist_matrix[i, j] = distance_along_neurite(
-                        nodes_list,
-                        node_ids[i],
-                        node_ids[j]
-                    )
-
-        # For each spine, set CND as the minimum distance
-        # to any spine further along the neurite (sorted order)
+        # For each spine, compute minimum distance to any spine
+        # further along the neurite (sorted order)
         for i, idx in enumerate(spine_indices):
-
-            # All spines after i in the sorted order are considered
-            # further along
-
-            further_indices = list(range(i + 1, n))
-
-            if not further_indices:
-                dataframe.loc[
-                    idx,
-                    f'consecutive_neighbor_distance_{input_identity}'
-                ] = np.nan
-
-            else:
-                dists = [
-                    dist_matrix[i, j] for j in further_indices
-                    if not np.isnan(dist_matrix[i, j])
-                ]
-
-                if not dists:
-                    dataframe.loc[
-                        idx,
-                        f'consecutive_neighbor_distance_{input_identity}'
-                    ] = np.nan
-                else:
-                    dataframe.loc[
-                        idx,
-                        f'consecutive_neighbor_distance_{input_identity}'
-                    ] = min(dists)
+            
+            min_dist = np.inf
+            
+            for j in range(i + 1, n): # Only spines after i in the sorted list
+                d = distance_along_neurite(nodes_list, node_ids[i], node_ids[j])
+                if d > 0 and d < min_dist:
+                    min_dist = d
+            
+            dataframe.loc[
+                idx,
+                f'consecutive_neighbor_distance_{input_identity}'
+            ] = min_dist if min_dist != np.inf else np.nan
 
     return dataframe
