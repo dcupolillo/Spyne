@@ -16,4 +16,3 @@ Example
 """
 
 from .plot import *
-from .timeseries import *

@@ -121,21 +121,24 @@ def body(
     tuple
         The updated time point and filtered series.
     """
-    xt = time_series[t]
-    xt_minus_1 = time_series[t - 1]
-    xt_plus_1 = time_series[t + 1]
+    xt = tf.gather(time_series, t)
+    xt_minus_1 = tf.gather(time_series, t - 1)
+    xt_plus_1 = tf.gather(time_series, t + 1)
 
     # Z is defined as signal saliency against background noise
-    Z = tf.abs((xt_plus_1 - mean) / st_dev)
+    z_raw = tf.math.divide_no_nan(xt_plus_1 - mean, st_dev)
+    Z = tf.abs(z_raw)
 
     # Check if xt is the median
-    condition = (xt - xt_minus_1) * (xt - xt_plus_1) > 0
-    updated_xt = (xt_minus_1 + Z * xt + xt_plus_1) / (2 + Z)
+    is_extrema = (xt - xt_minus_1) * (xt - xt_plus_1) > 0
+    xt_updated = (xt_minus_1 + Z * xt + xt_plus_1) / (2.0 + Z)
+    xt_new = tf.where(is_extrema, xt_updated, xt)
 
-    # Update filtered_series at index t
-    updated_xt = tf.reshape(tf.where(condition, updated_xt, xt), [1])
+    # Scatter the new value at index t
     filtered_series = tf.tensor_scatter_nd_update(
-        filtered_series, [[t]], tf.where(condition, updated_xt, xt))
+        filtered_series, indices=tf.reshape(t, [1, 1]),
+        updates=tf.reshape(xt_new, [1])
+    )
 
     return t + 1, filtered_series, time_series, mean, st_dev
 
@@ -168,14 +171,24 @@ def modified_okada_filter(
     st_dev = tf.math.reduce_std(time_series)
 
     # Execute the while loop starting from t=1
-    t = tf.constant(1)
-    loop_vars = [t, filtered_series, time_series, mean, st_dev]
+    t0 = tf.constant(1)
+    loop_vars = [t0, filtered_series, time_series, mean, st_dev]
+
     t, filtered_series, _, _, _ = tf.while_loop(
-        lambda t:
+        lambda t, filtered_series, time_series, mean, st_dev:
             condition(t, n_points),
         lambda t, filtered_series, time_series, mean, st_dev:
             body(t, filtered_series, time_series, mean, st_dev),
-        loop_vars
+        loop_vars=loop_vars,
+        parallel_iterations=1,
+        swap_memory=True,
+        shape_invariants=(
+            tf.TensorShape([]),
+            time_series.shape,
+            time_series.shape,
+            mean.shape,
+            st_dev.shape,
+            ),
     )
 
     return filtered_series

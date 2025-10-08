@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 import tensorflow as tf
 
-from spyne.core.timeseries.calculate_timeseries import dFF, get_timestamps, z_score
+from spyne.core.imaging.analysis.timeseries import dFF, get_timestamps, z_score
 
 
 def collect_timeseries(
@@ -145,5 +145,15 @@ def collect_timeseries(
                 # Sanity check to ensure sweep number consistency
                 assert (index_CA3 + index_BLA) == roi_meta['n_sweeps']
                 pbar.update(1)
+
+    assert zscores_CA3.shape == dFF_CA3.shape == ts_CA3.shape, "Inconsistent shapes for CA3 timeseries data"
+    assert zscores_BLA.shape == dFF_BLA.shape == ts_BLA.shape, "Inconsistent shapes for BLA timeseries data"
+
+    arrays = {i: array for i, array in enumerate(
+        ['zscores_CA3', 'dFF_CA3', 'ts_CA3', 'zscores_BLA', 'dFF_BLA', 'ts_BLA'])}
+    
+    for name, array in arrays.items():
+        if array.shape[0] != total_spines:
+            raise ValueError(f"Mismatch in number of spines and {name} shape")
 
     return zscores_CA3, dFF_CA3, ts_CA3, zscores_BLA, dFF_BLA, ts_BLA

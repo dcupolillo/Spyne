@@ -4,8 +4,8 @@
 import spyne
 from pathlib import Path
 
-date = "250820"
-cell_n = "cell0001"
+date = "250527"
+cell_n = "cell0003"
 data_folder = Path("data")
 imaging_folder = data_folder / date / cell_n / "neuron"
 

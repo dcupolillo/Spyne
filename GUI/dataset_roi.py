@@ -1,7 +1,7 @@
 """ Created on Wed Jun 25 15:22:26 2025
     @author: dcupolillo """
 
-from spyne.core.imagingdataset import ImagingDataset
+from spyne.core.imaging.imagingdataset import ImagingDataset
 from PyQt5.QtWidgets import (
     QMainWindow, QFrame, QLabel, QGridLayout,
     QSlider, QLineEdit)

@@ -3,14 +3,15 @@ Spyne - A Python package for analyzing calcium imaging data from dendrites and s
 """
 __version__ = "0.1.0"
 
-from .core.imagingdataset import ImagingDataset
-from .core.segmenter import DatasetSegmenter
+from .core.imaging.imagingdataset import ImagingDataset
+from .core.electrophysiology.ephydataset import EphyDataset
+from .core.spines.segmenter import DatasetSegmenter
 
 # Import plot submodule
 from . import plot
 
 # Import dataframe utility
-from .core.utils.dataframe import to_dataframe
+from .core.spines.dataframe import to_dataframe
 
 import sys
 from pathlib import Path

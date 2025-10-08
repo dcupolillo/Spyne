@@ -8,8 +8,8 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.gridspec import GridSpec
 from matplotlib.transforms import Affine2D
 from scipy.stats import sem
-from spyne.core.imagingdataset import Roi
-from spyne.core.utils.spine_node import euclidean_distance
+from spyne.core.imaging.imagingdataset import Roi
+from spyne.core.spines.spine_node import euclidean_distance
 
 
 def _collect_centroid_fov(

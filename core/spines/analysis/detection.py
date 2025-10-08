@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from spyne.core.semantic_segmentation.padding import unpad_predictions
+from spyne.core.spines.analysis.padding import unpad_predictions
 
 
 def inference(

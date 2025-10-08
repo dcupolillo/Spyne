@@ -1,22 +1,22 @@
 from __future__ import annotations
-
 from pathlib import Path
 from tqdm import tqdm
 import tifffile
 import numpy as np
 from skimage.util import img_as_uint
 from scipy.ndimage import median_filter
-from spyne.core.utils.pyabf_adc import get_digital_output_list
-from spyne.core.utils.correct_pmt_gating import (
-    modify_frames, collect_deviating_rows_for_channels)
-from spyne.core.utils.denoise import radius_to_kernel_size
+from spyne.core.electrophysiology.load import get_digital_output_list
+from spyne.core.imaging.preprocessing import (
+    modify_frames, collect_deviating_rows_for_channels, radius_to_kernel_size)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from spyne.core.imagingdataset import ImagingDataset
+    from spyne.core.imaging.imagingdataset import ImagingDataset
 
 
-def create_file_to_roi_map(dataset_instance: ImagingDataset) -> dict:
+def create_file_to_roi_map(
+        dataset_instance: ImagingDataset,
+) -> dict:
     """
     Create a mapping from file paths to ROI indices.
 
@@ -30,31 +30,32 @@ def create_file_to_roi_map(dataset_instance: ImagingDataset) -> dict:
     dict
         Mapping from file paths to ROI indices for metadata lookup.
     """
+    file_list = dataset_instance.file_list
+
     # Get z-values and create index mapping
     z_values = sorted(
         {int(file_path.parent.name[1:])
-         for file_path in dataset_instance.file_list})
+         for file_path in file_list})
     z_index_map = {z: idx for idx, z in enumerate(z_values)}
 
     # Create file to ROI index mapping
     file_to_roi_map = {}
-    for file_path in dataset_instance.file_list:
+    for file_path in file_list:
         z_value = int(file_path.parent.name[1:])
         z_index = z_index_map[z_value]
 
-        # Find the ROI index for this z-index
-        roi_index = None
+        # Find all ROI indices for this z-index
+        roi_indices = []
         for idx, meta in enumerate(dataset_instance.metadata):
             if meta['z_ind'] == z_index:
-                roi_index = idx
-                break
+                roi_indices.append(idx)
 
-        if roi_index is None:
+        if not roi_indices:
             raise ValueError(
                 f"No metadata found for z-index {z_index}",
                 "(z-value {z_value})")
 
-        file_to_roi_map[file_path] = roi_index
+        file_to_roi_map[file_path] = roi_indices
 
     return file_to_roi_map
 
@@ -75,7 +76,7 @@ def load_metadata_from_tiff(
     Parameters
     ----------
     dataset_instance : ImagingDataset
-        Dataset instance containing file_list, abf_file_list, 
+        Dataset instance containing file_list, abf_file_list,
         _sf (scanfield), and median_filter_kernel_size_um attributes.
 
     Returns
@@ -109,10 +110,13 @@ def load_metadata_from_tiff(
         for zplane in dataset_instance._sf.neuron
         for rect in zplane]
 
+    # Take 1 file per z-plane for metadata extraction
+    # to avoid redundant processing
     unique_roifile_list = list(
         {file_path.parent: file_path
             for file_path in dataset_instance.file_list}.values())
 
+    # Z plane to index mapping
     z_values = sorted(
         {int(file_path.parent.name[1:])
             for file_path in dataset_instance.file_list})
@@ -152,13 +156,7 @@ def load_metadata_from_tiff(
                 scanimage_metadata['RoiGroups']['imagingRoiGroup'])
             rois = roigroup_data['rois']
 
-            rois_list = []
-            if isinstance(rois, dict):
-                rois_list.append(rois)
-            elif isinstance(rois, list):
-                rois_list = rois
-            else:
-                raise TypeError(f"Unexpected type for rois: {type(rois)}")
+            rois_list = rois if isinstance(rois, list) else [rois]
 
             for n_roi_in_z, roi in enumerate(rois_list):
 
@@ -208,12 +206,12 @@ def load_metadata_from_tiff(
 
                 # Calculate pixel kernel size from micrometers
                 kernel_size_um = dataset_instance.median_filter_kernel_size_um
-                spatial_radius_x_um = kernel_size_um[0]  # x dimension
-                spatial_radius_y_um = kernel_size_um[1]  # y dimension
+                spatial_radius_y_um = kernel_size_um[1]
                 temporal_kernel_size = int(kernel_size_um[2])
-                
+
                 # Convert spatial radii to kernel sizes
-                # radius_to_kernel_size takes radius and returns (height, width)
+                # radius_to_kernel_size takes radius and returns
+                # (height, width)
                 kernel_size_y, kernel_size_x = radius_to_kernel_size(
                     spatial_radius_y_um,
                     tuple(resolution),  # (x_resolution, y_resolution)
@@ -244,7 +242,7 @@ def load_metadata_from_tiff(
                 roi_uuid_uint64 = roi_in_scanfield_object.roi_uuid_uint64
 
                 # Write the metadata entry
-                metadata.append({
+                metadata.append(dict({
                     'dtype': frame_data["SI.hScan2D.channelsDataType"],
                     'objective resolution': objective_resolution,
                     'affine': scanfield['affine'],
@@ -289,7 +287,7 @@ def load_metadata_from_tiff(
                     'median_filter_kernel_size_px': kernel_size_pixels,
                     'pmt_artifact_detection_threshold':
                         dataset_instance.pmt_artifact_detection_threshold
-                })
+                }))
 
                 n_roi_overall += 1
 
@@ -301,8 +299,6 @@ def load_metadata_from_tiff(
 
     for meta in metadata:
         grouped_metadata[meta['z_ind']].append(meta)
-
-    n_roi_overalls = len(metadata)
 
     for group in grouped_metadata:
         start_y = 0
@@ -316,7 +312,7 @@ def load_metadata_from_tiff(
         for group in grouped_metadata
         for meta in group]
 
-    return n_roi_overalls, output_metadata
+    return n_roi_overall, output_metadata
 
 
 def preprocess_tiff_file(
@@ -407,18 +403,25 @@ def load_imaging_data_from_tiff(
 
     data = [None] * len(dataset_instance.file_list)
 
-    # Create file to ROI index mapping once
-    file_to_roi_map = create_file_to_roi_map(dataset_instance)
+    file_to_roi_map = dataset_instance.file_to_roi_map
 
     for n, file_path in enumerate(tqdm(
             dataset_instance.file_list, desc="Loading data")):
+        
+        roi_indices = file_to_roi_map[file_path]
         try:
-            roi_index = file_to_roi_map[file_path]
+            # Use the first ROI index
+            # as relevant information for preprocessing,
+            # such as median_filter_kernel_size_px,
+            # are uniform across ROIs in the same file
+            roi_index = roi_indices[0]  
+            
             file_metadata = dataset_instance.metadata[roi_index]
 
             processed = preprocess_tiff_file(
                 file_path=Path(file_path),
                 file_metadata=file_metadata)
+            
             # Ensure dtype is int16
             processed = processed.astype(np.int16)
             data[n] = processed
@@ -427,6 +430,3 @@ def load_imaging_data_from_tiff(
             print(f"Error processing {file_path}: {e}")
 
     return data
-
-
-

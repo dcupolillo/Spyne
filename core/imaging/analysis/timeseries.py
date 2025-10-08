@@ -4,7 +4,7 @@
 import numpy as np
 import tensorflow as tf
 import tensorflow_probability as tfp
-from spyne.core.utils.filters import modified_okada_filter
+from spyne.core.imaging.preprocessing import modified_okada_filter
 
 
 def dFF(

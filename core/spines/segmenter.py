@@ -9,18 +9,17 @@ import tensorflow as tf
 import flammkuchen as fl
 from tqdm import tqdm
 from functools import cache
-
-from spyne.core.imagingdataset import ImagingDataset
-from spyne.display.plot_segmenter import rotate_and_transform_spines
-from spyne.core.semantic_segmentation.pipeline import (
+from spyne.core.imaging.imagingdataset import ImagingDataset
+from spyne.core.spines.analysis.pipeline import (
     semantic_segmentation_pipeline)
-from spyne.core.timeseries.timeseries_pipeline import collect_timeseries
-from spyne.core.timeseries.inference import (
+from spyne.core.imaging.analysis.pipeline import collect_timeseries
+from spyne.core.imaging.analysis.event_detection import (
     detect_calcium_events, binarize_calcium_event_probabilities)
-from spyne.core.timeseries.calculate_timeseries import (
-    dFF,
-    get_timestamps,
-    z_score)
+from spyne.core.imaging.analysis.timeseries import (
+    dFF, get_timestamps, z_score)
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from spyne.core.imaging.imagingdataset import imagingDataset
 
 
 class DatasetSegmenter:
@@ -53,7 +52,7 @@ class DatasetSegmenter:
 
     def __init__(
             self,
-            dataset: object,
+            dataset: imagingDataset,
             segmentation_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
                 r"inference_models/deepd3/"
@@ -734,7 +733,6 @@ class DatasetSegmenter:
                 f"Filename {filename} must end with '.h5'.")
 
         if data is not None and len(data) > 0:
-            output_folder = Path(output_folder)
             fl.save(output_folder / filename, data)
             print(f"Saved {filename} to {output_folder}")
 

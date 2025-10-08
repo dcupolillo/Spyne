@@ -6,7 +6,7 @@ from PyQt5 import QtWidgets
 from PyQt5.QtWidgets import (
     QMainWindow, QGridLayout, QWidget, QMessageBox, QMenu, QAction,
     QPushButton)
-from spyne.core.imagingdataset import ImagingDataset
+from spyne.core.imaging.imagingdataset import ImagingDataset
 from spyne.GUI.load import LoadFiles
 from spyne.GUI.utils import KernelDialog
 from spyne.GUI.dataset_roi import RoiPanel

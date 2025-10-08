@@ -4,12 +4,12 @@
 from __future__ import annotations
 import pandas as pd
 import numpy as np
-from spyne.core.utils.spine_node import (
+from spyne.core.spines.spine_node import (
     distance_along_neurite, get_path_to_root, path_distance)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from spyne.core.imagingdataset import DatasetSegmenter
+    from spyne.core.spines.segmenter import DatasetSegmenter
 
 
 def to_dataframe(

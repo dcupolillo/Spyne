@@ -2,7 +2,7 @@
     @author: dcupolillo """
 
 import numpy as np
-from spyne.core.semantic_segmentation.utils import (
+from spyne.core.spines.analysis.utils import (
     threshold_prediction, remove_corner_joints,
     remove_distant_spines, remove_small_labels,
     calculate_centroid, transform)

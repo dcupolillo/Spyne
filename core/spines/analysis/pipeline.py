@@ -1,8 +1,8 @@
-from spyne.core.semantic_segmentation.inference import inference
-from spyne.core.semantic_segmentation.post_processing import (
+from spyne.core.spines.analysis.detection import inference
+from spyne.core.spines.analysis.post_processing import (
     process_predictions)
-from spyne.core.semantic_segmentation.padding import pad_images
-from spyne.core.utils.spine_node import (
+from spyne.core.spines.analysis.padding import pad_images
+from spyne.core.spines.spine_node import (
     euclidean_distance, find_closest_node, distance_along_neurite, find_root)
 import numpy as np
 from tqdm import tqdm

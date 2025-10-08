@@ -9,11 +9,13 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from functools import cache
 import ROIpy as rp
-from spyne.core.utils.movie import (
-    animate_frames, save_frames, save_single_frame)
-from spyne.core.utils.filters import median, gaussian
-from spyne.core.utils.load import (
-    load_metadata_from_tiff, load_imaging_data_from_tiff)
+from spyne.core.imaging.io import (
+    animate_frames, save_frames, save_single_frame, save_processed_arrays,
+    load_processed_arrays)
+from spyne.core.imaging.preprocessing import median, gaussian
+from spyne.core.imaging.load import (
+    load_metadata_from_tiff, load_imaging_data_from_tiff,
+    create_file_to_roi_map)
 
 
 class ImagingDataset:
@@ -53,7 +55,7 @@ class ImagingDataset:
             folder: str or Path,
             kernel_size_um: tuple = (0.3, 0.3, 3),
             pmt_artifact_detection_threshold: int = 3,
-            lazy_load: bool = False,
+            load_processed: bool = True,
     ) -> None:
         """
         Initialize the ImagingDataset.
@@ -73,10 +75,9 @@ class ImagingDataset:
             Multiplicative factor for PMT artifact detection threshold.
             Higher values are more conservative in detecting artifacts.
             Default is 3.
-        lazy_load : bool, optional
-            If True, only loads metadata.
-            If False, loads and processes the imaging data
-            upon initialization. Default is False.
+        load_processed : bool, optional
+            Whether to try loading from processed files first.
+            If False, forces processing from raw TIFF files. Default is True.
 
         Raises
         ------
@@ -131,44 +132,36 @@ class ImagingDataset:
         self.pmt_artifact_detection_threshold = (
             pmt_artifact_detection_threshold)
 
-        stack_file = next(
+        _stack_file = next(
             (f for f in folder.parent.glob('**/*')
              if f.suffix.lower() in ('.tif', '.tiff')
              and 'stack' in f.stem.lower()),
             None)
 
-        stack = rp.Stack(stack_file)
+        _stack = rp.Stack(_stack_file)
 
-        swc_file = next(folder.parent.glob('*.swc'), None)
+        _swc_file = next(folder.parent.glob('*.swc'), None)
 
-        self._morph = rp.Morphology(swc_file, stack)
+        self._morph = rp.Morphology(_swc_file, _stack)
         self._sf = rp.Scanfields(self._morph)
 
         self.metadata = self._load_metadata()
+        self.file_to_roi_map = create_file_to_roi_map(self)
 
-        # Lazy load data
-        self._data = None if lazy_load else self._load_data()
+        self.load_processed = load_processed
+
+        self._data = self._load_data(load_processed=load_processed)
 
     @property
     def data(self):
         """
         Imaging data for all ROIs.
 
-        Raises
-        ------
-        ValueError
-            If data is not loaded. Use load_data() after initialization.
-
         Returns
         -------
         list
             List of processed imaging data arrays.
         """
-        if self._data is None:
-            raise ValueError(
-                "Data not loaded. Set 'load_data=True' when initializing "
-                "ImagingDataset, or call .load_data().")
-
         return self._data
 
     def _load_metadata(self):
@@ -190,37 +183,121 @@ class ImagingDataset:
 
         return metadata
 
-    def load_data(self) -> None:
+    def load_data(self, load_processed: bool = True) -> None:
         """
-        Public method to load and process imaging data after initialization.
+        Public method to reload imaging data with different parameters.
 
-        This method allows you to load imaging data if the dataset was
-        initialized with load_data=False. After calling, the .data property
-        will be available.
+        This method allows you to reload imaging data with different
+        processing options (e.g., to force processing from raw files
+        instead of using processed data).
+
+        Parameters
+        ----------
+        load_processed : bool, optional
+            Whether to try loading from processed files first. Default is True.
+            Set to False to force processing from raw TIFF files.
 
         Returns
         -------
         None
         """
-        self._data = self._load_data()
+        self._data = self._load_data(load_processed=load_processed)
 
-    def _load_data(self):
+    def _load_data(
+            self,
+            load_processed: bool = True,
+            processed_data_filename: str = "processed_data.h5"
+    ) -> list:
         """
         Private method to load and process imaging data.
 
-        Uses load_imaging_data_from_tiff() function
-        to load the raw .tiff data and perform some
-        initial processing, including:
-        - gating-PMT artifact correction
-        - 3D median filter
+        First tries to load from saved processed data if available,
+        otherwise falls back to processing from raw TIFF files.
+
+        Parameters
+        ----------
+        use_processed : bool, optional
+            Whether to try loading from processed files first. Default is True.
 
         Returns
         -------
         list
             A list of processed imaging data arrays.
         """
+        # Try to load from processed data first
+        if load_processed:
+            processed_files = list(self.folder.glob(processed_data_filename))
+
+            if processed_files:
+                try:
+                    processed_file = processed_files[0]
+                    data, _ = load_processed_arrays(processed_file)
+
+                    return data
+
+                except Exception as e:
+                    print(
+                        f"Failed to load processed data ({e}), "
+                        "processing from TIFF files...")
 
         return load_imaging_data_from_tiff(self)
+
+    def save_processed_data(
+            self,
+            save_path: Path = None,
+            overwrite: bool = False
+    ) -> Path:
+        """
+        Save the processed imaging data to disk for fast loading later.
+
+        This method saves the current processed data (self.data) along with
+        the processing parameters used, allowing for much faster loading
+        in subsequent sessions.
+
+        Parameters
+        ----------
+        save_path : Path, optional
+            Path where to save the processed data. If None, uses a standard
+            filename in the dataset folder.
+        overwrite : bool, optional
+            Whether to overwrite existing file. Default is False.
+
+        Returns
+        -------
+        Path
+            Path to the saved file.
+
+        Raises
+        ------
+        ValueError
+            If data is not loaded yet.
+
+        Example
+        -------
+        >>> dataset = ImagingDataset(folder)  # This processes the data
+        >>> dataset.save_processed_data()
+        """
+        if self._data is None:
+            raise ValueError(
+                "No data to save. Load data first with load_data() "
+                "or lazy_load=False")
+
+        save_path = (
+            self.folder / "processed_data.h5" if save_path is None
+            else save_path)
+
+        processing_params = {
+            'kernel_size_um': self.median_filter_kernel_size_um,
+            'pmt_artifact_detection_threshold':
+                self.pmt_artifact_detection_threshold,
+            'dataset_folder': str(self.folder),
+            'dataset_name': self.name,
+            'n_files': len(self.file_list),
+            'n_rois': self.n_rois
+        }
+
+        return save_processed_arrays(
+            self._data, save_path, processing_params, overwrite)
 
     def __len__(self):
         return len(self.roi_list)
