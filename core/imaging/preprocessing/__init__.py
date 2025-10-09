@@ -25,8 +25,6 @@ __all__ = [
     # Filters
     'median',
     'gaussian', 
-    'modified_okada_filter',
-    'ewma',
     # Denoising
     'radius_to_kernel_size',
     'compute_local_contrast',

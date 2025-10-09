@@ -2,7 +2,6 @@
     @author: dcupolillo """
 
 from __future__ import annotations
-
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
@@ -55,7 +54,6 @@ class ImagingDataset:
             folder: str or Path,
             kernel_size_um: tuple = (0.3, 0.3, 3),
             pmt_artifact_detection_threshold: int = 3,
-            load_processed: bool = True,
     ) -> None:
         """
         Initialize the ImagingDataset.
@@ -75,9 +73,6 @@ class ImagingDataset:
             Multiplicative factor for PMT artifact detection threshold.
             Higher values are more conservative in detecting artifacts.
             Default is 3.
-        load_processed : bool, optional
-            Whether to try loading from processed files first.
-            If False, forces processing from raw TIFF files. Default is True.
 
         Raises
         ------
@@ -88,25 +83,7 @@ class ImagingDataset:
             If the imaging path is invalid, non-existent, or empty.
         """
 
-        if not folder.exists():
-            raise Exception(f"{folder} does not exist.")
-
-        if not folder.is_dir():
-            raise Exception(f"{folder} must be a path to a FOLDER.")
-
-        if not any(folder.iterdir()):
-            raise Exception(f"{folder} is empty.")
-
-        if not isinstance(kernel_size_um, tuple):
-            raise TypeError("'kernel_size_um' must be a tuple.")
-
-        if not len(kernel_size_um) == 3:
-            raise Exception("kernel_size_um must be of size 3.")
-
-        if not isinstance(pmt_artifact_detection_threshold, int):
-            raise TypeError(
-                "'pmt_artifact_detection_threshold' must be an integer.")
-
+        self._foldercheck(folder=Path(folder))
         self.folder = Path(folder)
         self.parent_folder = folder.parent
 
@@ -128,7 +105,13 @@ class ImagingDataset:
         if not self.abf_file_list:
             raise Exception(f"No ABF files found in {folder}.")
 
+        self._kernelcheck(kernel_size_um=kernel_size_um)
         self.median_filter_kernel_size_um = kernel_size_um
+
+        if not isinstance(pmt_artifact_detection_threshold, int):
+            raise TypeError(
+                "'pmt_artifact_detection_threshold' must be an integer.")
+        
         self.pmt_artifact_detection_threshold = (
             pmt_artifact_detection_threshold)
 
@@ -148,9 +131,52 @@ class ImagingDataset:
         self.metadata = self._load_metadata()
         self.file_to_roi_map = create_file_to_roi_map(self)
 
-        self.load_processed = load_processed
+        self._data = self._load_data()
 
-        self._data = self._load_data(load_processed=load_processed)
+    def _foldercheck(self, folder: Path) -> None:
+        """
+        Check if the folder path is valid.
+
+        Raises
+        ------
+        Exception
+            If the imaging path is invalid, non-existent, or empty.
+        """
+
+        if not folder.exists():
+            raise Exception(f"{folder} does not exist.")
+
+        if not folder.is_dir():
+            raise Exception(f"{folder} must be a path to a FOLDER.")
+
+        if not any(folder.iterdir()):
+            raise Exception(f"{folder} is empty.")
+
+    def _kernelcheck(self, kernel) -> None:
+        """
+        Check if the median filter kernel size is valid.
+
+        Raises
+        ------
+        Exception
+            If the kernel size is not a tuple of size 3.
+        """
+
+        if not isinstance(kernel, tuple):
+            raise TypeError("'kernel' must be a tuple.")
+
+        if not len(kernel) == 3:
+            raise Exception("kernel must be of size 3.")
+
+        x, y, t = kernel
+
+        if x % 2 == 0:
+            raise Exception("X kernel size must be odd.")
+        if y % 2 == 0:
+            raise Exception("Y kernel size must be odd.")
+        if not isinstance(t, int):
+            raise TypeError("Temporal kernel size must be an integer.")
+
 
     @property
     def data(self):
@@ -183,7 +209,7 @@ class ImagingDataset:
 
         return metadata
 
-    def load_data(self, load_processed: bool = True) -> None:
+    def load_data(self) -> None:
         """
         Public method to reload imaging data with different parameters.
 
@@ -201,12 +227,11 @@ class ImagingDataset:
         -------
         None
         """
-        self._data = self._load_data(load_processed=load_processed)
+        self._data = self._load_data()
 
     def _load_data(
-            self,
-            load_processed: bool = True,
-            processed_data_filename: str = "processed_data.h5"
+        self,
+        processed_data_filename: str = "processed_data.h5"
     ) -> list:
         """
         Private method to load and process imaging data.
@@ -216,30 +241,25 @@ class ImagingDataset:
 
         Parameters
         ----------
-        use_processed : bool, optional
-            Whether to try loading from processed files first. Default is True.
+        processed_data_filename : str, optional
+            Filename to look for processed data. Default is 'processed_data.h5'.
 
         Returns
         -------
         list
             A list of processed imaging data arrays.
         """
-        # Try to load from processed data first
-        if load_processed:
-            processed_files = list(self.folder.glob(processed_data_filename))
+        processed_files = list(self.folder.glob(processed_data_filename))
 
-            if processed_files:
-                try:
-                    processed_file = processed_files[0]
-                    data, _ = load_processed_arrays(processed_file)
+        if processed_files:
+            try:
+                processed_file = processed_files[0]
+                data, _ = load_processed_arrays(processed_file)
+                return data
+            except Exception as e:
+                pass
 
-                    return data
-
-                except Exception as e:
-                    print(
-                        f"Failed to load processed data ({e}), "
-                        "processing from TIFF files...")
-
+        # Fallback to loading from TIFF files
         return load_imaging_data_from_tiff(self)
 
     def save_processed_data(

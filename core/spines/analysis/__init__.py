@@ -15,6 +15,7 @@ from .segmentation.utils import (
 from .timeseries.pipeline import collect_timeseries
 from .timeseries.event_detection import detect_calcium_events, binarize_calcium_event_probabilities
 from .timeseries.timeseries import dFF, get_timestamps, z_score
+from .timeseries.filters import modified_okada_filter, ewma
 
 __all__ = [
     # Segmentation
@@ -38,4 +39,6 @@ __all__ = [
     'dFF',
     'get_timestamps',
     'z_score',
+    'modified_okada_filter',
+    'ewma',
 ]
