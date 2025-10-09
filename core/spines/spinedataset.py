@@ -19,16 +19,16 @@ from spyne.core.imaging.analysis.timeseries import (
     dFF, get_timestamps, z_score)
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from spyne.core.imaging.imagingdataset import imagingDataset
+    from spyne.core.imaging.imagingdataset import ImagingDataset
 
 
-class DatasetSegmenter:
+class SpineDataset:
     """
     A manager class for analyzing dendritic imaging datasets.
 
     This class provides functionalities for:
     - Processing imaging data and performing semantic segmentation of spines
-      and dendrites using a neural network.
+        and dendrites using a neural network.
     - Analyzing calcium dynamics within segmented spines.
     - Detecting calcium events using a built-in classifier.
     - Visualizing spines, dendrites, and related data.
@@ -38,21 +38,21 @@ class DatasetSegmenter:
     >>> import spyne
     >>> paths = "path/to/your/folder"
     >>> dataset = spyne.ImagingDataset(paths)
-    >>> segmenter = spyne.DatasetSegmenter(dataset)
+    >>> spine_dataset = spyne.SpineDataset(dataset)
 
     >>> # Run segmentation and analyze the dataset
-    >>> segmenter.collect_all_data()
-    >>> segmenter.calcium_events_predictions()
+    >>> spine_dataset.collect_all_data()
+    >>> spine_dataset.calcium_events_predictions()
 
     >>> # Visualize detected spines
-    >>> segmenter.plot_all_spines()
-    >>> segmenter.plot_events_spines(input_type='BLA')
-    >>> segmenter.sholl(morphology=morph, radius_step=1, n_radii=10)
+    >>> spine_dataset.plot_all_spines()
+    >>> spine_dataset.plot_events_spines(input_type='BLA')
+    >>> spine_dataset.sholl(morphology=morph, radius_step=1, n_radii=10)
     """
 
     def __init__(
-            self,
-            dataset: imagingDataset,
+        self,
+        dataset: ImagingDataset,
             segmentation_model_fn: str or Path = (
                 r"C:/Users/dcupolillo/Projects/spyne/"
                 r"inference_models/deepd3/"
@@ -421,7 +421,7 @@ class DatasetSegmenter:
         output_folder = (
             self._dataset.folder.parent if save_path is None else save_path)
 
-        segmenters = self._collect_spines_and_dendrites_data(
+        spine_datasets = self._collect_spines_and_dendrites_data(
             save=save,
             save_path=output_folder
         )
@@ -485,7 +485,7 @@ class DatasetSegmenter:
         """
 
         (
-            segmenters,
+            spine_datasets,
             self.spines_data,
             self.dendrites_data,
             self.spine_predictions,
@@ -497,13 +497,13 @@ class DatasetSegmenter:
         )
 
         # Store segmenters as instance attribute for later use
-        self._segmenters = segmenters
+        self._spine_datasets = spine_datasets
 
         self.n_spines = len(self.spines_data)
 
-        # Link the precomputed spines data to the RoiSegmenter
+    # Link the precomputed spines data to the RoiSpine
         spine_counter = 0
-        for roi_index, segmenter in enumerate(segmenters):
+        for roi_index, segmenter in enumerate(spine_datasets):
             n_spines_per_roi = len(
                 [z for z in self.spines_data
                  if z['roi_n'] == roi_index])
@@ -533,7 +533,7 @@ class DatasetSegmenter:
             for filename, data in data_to_save.items():
                 self._save_to_h5(data, saving_folder, filename)
 
-        return segmenters
+        return spine_datasets
 
     def _collect_timeseries(
             self,
@@ -737,7 +737,7 @@ class DatasetSegmenter:
             print(f"Saved {filename} to {output_folder}")
 
     @cache
-    def _get_roi(self, roi_index: int) -> RoiSegmenter:
+    def _get_roi(self, roi_index: int) -> RoiSpine:
         """
         Retrieve a specific ROI's segmentation and associated data.
 
@@ -748,9 +748,9 @@ class DatasetSegmenter:
 
         Returns
         -------
-        RoiSegmenter
-            An instance containing individual ROI data, metadata, and
-            segmentation.
+        RoiSpine
+                An instance containing individual ROI data, metadata, and
+                segmentation.
 
         Raises
         ------
@@ -804,26 +804,26 @@ class DatasetSegmenter:
             else None
         )
 
-        return RoiSegmenter(
-            roi_index,
-            roi_metadata,
-            self._dataset[roi_index],
-            self.params,
-            selected_dFF_CA3,
-            selected_zscore_CA3,
-            selected_ts_CA3,
-            selected_dFF_BLA,
-            selected_zscore_BLA,
-            selected_ts_BLA,
-            selected_spines_data,
-            selected_calcium_events_BLA,
-            selected_calcium_events_CA3,
-            selected_calcium_events_binary_BLA,
-            selected_calcium_events_binary_CA3,
-            spine_predictions,
-            dendrite_predictions)
+        return RoiSpine(
+                roi_index,
+                roi_metadata,
+                self._dataset[roi_index],
+                self.params,
+                selected_dFF_CA3,
+                selected_zscore_CA3,
+                selected_ts_CA3,
+                selected_dFF_BLA,
+                selected_zscore_BLA,
+                selected_ts_BLA,
+                selected_spines_data,
+                selected_calcium_events_BLA,
+                selected_calcium_events_CA3,
+                selected_calcium_events_binary_BLA,
+                selected_calcium_events_binary_CA3,
+                spine_predictions,
+                dendrite_predictions)
 
-    def __getitem__(self, roi_index: int) -> RoiSegmenter:
+    def __getitem__(self, roi_index: int) -> RoiSpine:
         if roi_index not in self._dataset.roi_list:
             raise IndexError(
                 f'Roi {roi_index} out of range {len(self._dataset.roi_list)}')
@@ -839,9 +839,9 @@ class DatasetSegmenter:
         self._current_index = 0
         return self
 
-    def __next__(self) -> RoiSegmenter:
+    def __next__(self) -> RoiSpine:
         if self._current_index < len(self._dataset):
-            roi_segmenter = RoiSegmenter(self._dataset, self._current_index)
+            roi_spine = RoiSpine(self._dataset, self._current_index)
             self._current_index += 1
             return roi_segmenter
         else:
@@ -983,7 +983,7 @@ class DatasetSegmenter:
             else [])
 
 
-class RoiSegmenter:
+class RoiSpine:
     """
     Manage segmentation and analysis of spines and dendrites
     for a specific ROI.
@@ -1032,7 +1032,7 @@ class RoiSegmenter:
             dendrite_predictions: np.ndarray
     ) -> None:
         """
-        Initialize the RoiSegmenter instance for a specific ROI.
+    Initialize the RoiSpine instance for a specific ROI.
 
         Parameters
         ----------
@@ -1233,7 +1233,7 @@ class RoiSegmenter:
                 "Run DatasetSegmenter.collect_all_data() first.")
         return self._get_spine(spine_index)
 
-    def __iter__(self) -> RoiSegmenter:
+    def __iter__(self) -> RoiSpine:
         if self.spines_data is None:
             raise KeyError(
                 "No spine data available. "

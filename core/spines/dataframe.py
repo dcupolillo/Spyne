@@ -4,24 +4,24 @@
 from __future__ import annotations
 import pandas as pd
 import numpy as np
-from spyne.core.spines.spine_node import (
+from spyne.core.spines.spatial_distances import (
     distance_along_neurite, get_path_to_root, path_distance)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from spyne.core.spines.segmenter import DatasetSegmenter
+    from spyne.core.spines.spinedataset import SpineDataset
 
 
 def to_dataframe(
-        segmenter: DatasetSegmenter,
+    spine_dataset: SpineDataset,
         n_events_threshold: int = 1
 ) -> pd.DataFrame:
     """
-    Convert spine data from a DatasetSegmenter into a pandas DataFrame.
+    Convert spine data from a SpineDataset into a pandas DataFrame.
     Parameters
     ----------
-    segmenter : DatasetSegmenter
-        The DatasetSegmenter instance containing spine data and predictions.
+    spine_dataset : SpineDataset
+        The SpineDataset instance containing spine data and predictions.
     Returns
     -------
     pd.DataFrame
@@ -29,15 +29,15 @@ def to_dataframe(
         computed columns.
     """
     
-    data_list = segmenter.spines_data
-    neuron_id = segmenter._dataset.name
-    nodes_list = segmenter._dataset._morph.neuron
+    data_list = spine_dataset.spines_data
+    neuron_id = spine_dataset._dataset.name
+    nodes_list = spine_dataset._dataset._morph.neuron
 
     df = spines_to_dataframe(
         data_list,
         neuron_id,
-        segmenter.calcium_events_binary_BLA,
-        segmenter.calcium_events_binary_CA3,
+    spine_dataset.calcium_events_binary_BLA,
+    spine_dataset.calcium_events_binary_CA3,
         n_events_threshold,
         nodes_list
     )

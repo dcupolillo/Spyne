@@ -15,7 +15,7 @@ imaging_folder = data_folder / date / cell_n / "neuron"
 
 dataset = spyne.ImagingDataset(imaging_folder)
 ephy = spyne.EphyDataset(dataset)
-segmenter = spyne.DatasetSegmenter(dataset)
+spine_dataset = spyne.SpineDataset(dataset)
 
 # Index individual sweep of selected ROI of slected Scanfield
 # Dimensions are: [roi_number][sweep_number]
@@ -35,27 +35,27 @@ single_frame_green = channel_green[0]
 single_frame_green.show(cmap='binary')
 
 # To launch an analysis on a complete neuron dataset
-segmenter.collect_all_data()
+spine_dataset.collect_all_data()
 
 # Work on single roi after data collection
-segmented_roi = segmenter[0]
+segmented_roi = spine_dataset[0]
 
 # ================
 # Plotting example
 # ================
 
-import spyne.plot as plt_spyne
+import spyne.plot
 
 # Plot all spine 2D position
-plt_spyne.scatter(segmenter.spines_data)
+spyne.plot.scatter(spine_dataset.spines_data)
 
 # Plot BLA-activated spines
-plt_spyne.scatter_event(
-    segmenter.spines_data,
-    segmenter.calcium_events_binary_BLA)
+spyne.plot.scatter_event(
+    spine_dataset.spines_data,
+    spine_dataset.calcium_events_binary_BLA)
 
 # Traces heatmap
-plt_spyne.heatmap(
-    segmenter.dFF_BLA,
-    segmenter.ts_BLA,
-    segmenter.calcium_events_binary_BLA)
+spyne.plot.heatmap(
+    spine_dataset.dFF_BLA,
+    spine_dataset.ts_BLA,
+    spine_dataset.calcium_events_binary_BLA)

@@ -47,7 +47,7 @@ If you only want to use plotting and data loading features (not deep learning/se
 `spyne` is composed of 2 main elements:
 
 1. **ImagingDataset** : manages the actual imaging data and metadata;
-2. **DatasetSegmenter** : performs spine-wise calcium imaging analysis.
+2. **SpineDataset** : performs spine-wise calcium imaging analysis.
 
 #### Dataset
 
@@ -61,7 +61,7 @@ Dataset
             └── Frames
 ```
 
-#### Segmenter
+#### SpineDataset
 
 ---
 
@@ -82,9 +82,9 @@ cell_n = "cell0001"  #cell000n format
 data_folder = Path("data")  # where your data is stored
 imaging_folder = data_folder / date / cell_n / "neuron"
 
-# Initialize the dataset and segmenter to identify spines
+# Initialize the dataset and spine_dataset to identify spines
 dataset = spyne.ImagingDataset(imaging_folder)
-segmenter = spyne.DatasetSegmenter(dataset)
+spine_dataset = spyne.SpineDataset(dataset)
 ```
 
 ---
@@ -93,7 +93,7 @@ segmenter = spyne.DatasetSegmenter(dataset)
 
 ### ImagingDataset
 
-### DatasetSegmenter
+### SpineDataset
 
 ## Key Features
 

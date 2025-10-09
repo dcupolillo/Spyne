@@ -5,7 +5,7 @@ __version__ = "0.1.0"
 
 from .core.imaging.imagingdataset import ImagingDataset
 from .core.electrophysiology.ephydataset import EphyDataset
-from .core.spines.segmenter import DatasetSegmenter
+from .core.spines.spinedataset import SpineDataset
 
 # Import plot submodule
 from . import plot
