@@ -4,7 +4,7 @@
 from __future__ import annotations
 import pandas as pd
 import numpy as np
-from spyne.core.spines.spatial_distances import (
+from spyne.core.spines.analysis.spatial_distances import (
     distance_along_neurite, get_path_to_root, path_distance)
 
 from typing import TYPE_CHECKING

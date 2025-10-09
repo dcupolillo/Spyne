@@ -5,8 +5,7 @@ This module contains functions for image filtering, denoising, and artifact corr
 """
 
 # Import main filtering functions
-from .filters import median, gaussian, modified_okada_filter, ewma
-
+from .filters import median, gaussian
 # Import denoising functions
 from .denoise import (
     radius_to_kernel_size, 

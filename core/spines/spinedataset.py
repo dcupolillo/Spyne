@@ -10,12 +10,12 @@ import flammkuchen as fl
 from tqdm import tqdm
 from functools import cache
 from spyne.core.imaging.imagingdataset import ImagingDataset
-from spyne.core.spines.analysis.pipeline import (
+from spyne.core.spines.analysis.segmentation.pipeline import (
     semantic_segmentation_pipeline)
-from spyne.core.imaging.analysis.pipeline import collect_timeseries
-from spyne.core.imaging.analysis.event_detection import (
+from spyne.core.spines.analysis.timeseries.pipeline import collect_timeseries
+from spyne.core.spines.analysis.timeseries.event_detection import (
     detect_calcium_events, binarize_calcium_event_probabilities)
-from spyne.core.imaging.analysis.timeseries import (
+from spyne.core.spines.analysis.timeseries.timeseries import (
     dFF, get_timestamps, z_score)
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:

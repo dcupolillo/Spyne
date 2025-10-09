@@ -9,7 +9,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.transforms import Affine2D
 from scipy.stats import sem
 from spyne.core.imaging.imagingdataset import Roi
-from spyne.core.spines.spatial_distances import euclidean_distance
+from spyne.core.spines.analysis.spatial_distances import euclidean_distance
 
 
 def _collect_centroid_fov(

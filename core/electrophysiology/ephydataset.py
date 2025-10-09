@@ -10,7 +10,7 @@ from functools import cache
 import tensorflow as tf
 from spyne.core.electrophysiology.load import (
     load_metadata_from_abf, load_data_from_abf, find_test_pulse_window)
-from spyne.core.electrophysiology.pyabf_passive_props import (
+from spyne.core.electrophysiology.analysis.pyabf_passive_props import (
     analyze_I_steps, unpack_spike_dfs, passive_properties)
 from spyne.core.electrophysiology.analysis.synaptic_events import BLA_EPSCs
 
