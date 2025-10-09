@@ -1,10 +1,14 @@
 """ Created on Wed Sep  6 11:31:57 2023
-    @author: dcupolillo """
+    @author: dcupolillo 
+    
+    Input/Output functions for imaging data.
+    """
 
 from pathlib import Path
 import cv2
 import numpy as np
 import flammkuchen as fl
+import json
 import time
 
 
@@ -494,7 +498,6 @@ def load_processed_arrays(
         raise FileNotFoundError(
             f"Processed arrays file not found: {load_path}")
 
-    print(f"Loading processed arrays from: {load_path}")
     start_time = time.time()
 
     try:
@@ -514,8 +517,7 @@ def load_processed_arrays(
         file_size_mb = load_path.stat().st_size / (1024**2)
         n_arrays = len(arrays)
 
-        print(f"✓ Loaded {n_arrays} processed arrays ({file_size_mb:.1f} MB) "
-              f"in {elapsed:.1f}s")
+        print(f"✓ Loaded {n_arrays} processed arrays from: {load_path}")
 
         # Return arrays and combined info
         info = {
@@ -530,3 +532,63 @@ def load_processed_arrays(
     except Exception as e:
         raise ValueError(
             f"Failed to load processed arrays from {load_path}: {e}") from e
+
+
+def save_metadata(
+    metadata: dict,
+    save_path: str or Path,
+    overwrite: bool = False
+) -> None:
+    """
+    Save the metadata to a .json file for fast loading and inspection.
+
+    Parameters
+    ----------
+    save_path : Path, optional
+        Path where to save the metadata. If None, uses 'metadata.json' in the dataset folder.
+    overwrite : bool, optional
+        Whether to overwrite existing file. Default is False.
+
+    Returns
+    -------
+    Path
+        Path to the saved file.
+    """
+    if metadata is None:
+        raise ValueError("No metadata to save. Load metadata first.")
+
+    save_path = Path("metadata.json") if save_path is None else Path(save_path)
+
+    if save_path.exists() and not overwrite:
+        raise FileExistsError(
+            f"{save_path} already exists. Use overwrite=True to overwrite.")
+
+    with open(save_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2)
+    print(f"✓ Saved metadata to {save_path}.")
+    return
+
+
+def load_saved_metadata(
+    load_path: str or Path
+) -> dict:
+    """
+    Load metadata from a saved .json file.
+
+    Parameters
+    ----------
+    load_path : str or Path
+        Path to the saved metadata file.
+
+    Returns
+    -------
+    dict
+        The loaded metadata dictionary.
+    """
+    load_path = Path(load_path)
+    if not load_path.exists():
+        raise FileNotFoundError(f"Metadata file not found: {load_path}")
+    with open(load_path, "r", encoding="utf-8") as f:
+        metadata = json.load(f)
+    print(f"✓ Loaded metadata from {load_path}.")
+    return metadata

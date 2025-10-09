@@ -1,3 +1,9 @@
+""" Created on Fri Aug  2 14:58:52 2024
+    @author: dcupolillo
+
+    Loading logics for metadata and data from raw ScanImage TIFF files.
+"""
+
 from __future__ import annotations
 from pathlib import Path
 from tqdm import tqdm
@@ -244,7 +250,7 @@ def load_metadata_from_tiff(
                 # Write the metadata entry
                 metadata.append(dict({
                     'dtype': frame_data["SI.hScan2D.channelsDataType"],
-                    'objective resolution': objective_resolution,
+                    'objective_resolution': objective_resolution,
                     'affine': scanfield['affine'],
                     'translate': translate,
                     'center_xy': center_xy,

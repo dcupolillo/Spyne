@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 from pathlib import Path
+from typing import Union
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
@@ -10,7 +11,7 @@ from functools import cache
 import ROIpy as rp
 from spyne.core.imaging.io import (
     animate_frames, save_frames, save_single_frame, save_processed_arrays,
-    load_processed_arrays)
+    load_processed_arrays, load_saved_metadata, save_metadata)
 from spyne.core.imaging.preprocessing import median, gaussian
 from spyne.core.imaging.load import (
     load_metadata_from_tiff, load_imaging_data_from_tiff,
@@ -85,18 +86,20 @@ class ImagingDataset:
 
         self._foldercheck(folder=Path(folder))
         self.folder = Path(folder)
-        self.parent_folder = folder.parent
 
-        # safe for both absolute and relative paths
-        self.date, self.cell_number, _ = self.folder.parts[-3:]
+        # New folder structure: /raw/imaging/date/cell_n
+        self.date, self.cell_number = self.folder.parts[-2:]
         self.name = f"{self.date}_{self.cell_number}"
 
+        raw_tiff_folder = self.folder / "raw" / "tiff"
+        raw_abf_folder = self.folder / "raw" / "abf"
+
         self.file_list = [
-            file_path for file_path in folder.rglob('*')
+            file_path for file_path in raw_tiff_folder.rglob('*')
             if file_path.suffix.lower() in ('.tif', '.tiff')]
 
         self.abf_file_list = [
-            file_path for file_path in folder.rglob('*')
+            file_path for file_path in raw_abf_folder.rglob('*')
             if file_path.suffix.lower() == ".abf"]
 
         if not self.file_list:
@@ -105,33 +108,33 @@ class ImagingDataset:
         if not self.abf_file_list:
             raise Exception(f"No ABF files found in {folder}.")
 
-        self._kernelcheck(kernel_size_um=kernel_size_um)
+        self._kernelcheck(kernel=kernel_size_um)
         self.median_filter_kernel_size_um = kernel_size_um
 
         if not isinstance(pmt_artifact_detection_threshold, int):
             raise TypeError(
                 "'pmt_artifact_detection_threshold' must be an integer.")
-        
+
         self.pmt_artifact_detection_threshold = (
             pmt_artifact_detection_threshold)
 
+        _swc_and_stack_dir = self.folder / "raw"
         _stack_file = next(
-            (f for f in folder.parent.glob('**/*')
+            (f for f in _swc_and_stack_dir.glob("*.tif")
              if f.suffix.lower() in ('.tif', '.tiff')
-             and 'stack' in f.stem.lower()),
-            None)
+             and 'stack' in f.stem.lower()), None)
+        _stack = rp.Stack(_stack_file) if _stack_file else None
 
-        _stack = rp.Stack(_stack_file)
 
-        _swc_file = next(folder.parent.glob('*.swc'), None)
+        _swc_file = next(_swc_and_stack_dir.glob('*.swc'), None)
 
-        self._morph = rp.Morphology(_swc_file, _stack)
-        self._sf = rp.Scanfields(self._morph)
+        self._morph = rp.Morphology(_swc_file, _stack) if _swc_file and _stack else None
+        self._sf = rp.Scanfields(self._morph) if self._morph else None
 
         self.metadata = self._load_metadata()
-        self.file_to_roi_map = create_file_to_roi_map(self)
+        self.data = self._load_data()
 
-        self._data = self._load_data()
+        self.file_to_roi_map = create_file_to_roi_map(self)
 
     def _foldercheck(self, folder: Path) -> None:
         """
@@ -177,39 +180,64 @@ class ImagingDataset:
         if not isinstance(t, int):
             raise TypeError("Temporal kernel size must be an integer.")
 
-
-    @property
-    def data(self):
+    def load_metadata(
+        self,
+        filename: str or Path = "metadata.json"
+    ) -> None:
         """
-        Imaging data for all ROIs.
+        Public method to load imaging metadata with different parameters.
+        This method allows you to manually load imaging metadata.
+
+        Parameters
+        ----------
+        filename : str or Path
+            Filename to load metadata from. Default is "metadata.json".
 
         Returns
         -------
-        list
-            List of processed imaging data arrays.
+        None
         """
-        return self._data
+        self._metadata = self._load_metadata(metadata_filename=filename)
 
-    def _load_metadata(self):
+    def _load_metadata(
+        self,
+        metadata_filename: str = "metadata.json"
+    ) -> list:
         """
-        Load metadata for all ROIs.
+        Private method to load metadata for all ROIs.
 
-        This method extracts information from acquisition files.
-        Uses load_metadata_from_tiff() function to return
-        n_rois and structured metadata.
+        This method first tries to load metadata from a saved .h5 file.
+        If not found, it loads from acquisition files (TIFF).
 
         Returns
         -------
         list
             A list of metadata dictionaries for all ROIs.
         """
+        metadata_files = list(self.folder.glob(metadata_filename))
+
+        if metadata_files:
+            try:
+                metadata_file = metadata_files[0]
+                metadata = load_saved_metadata(metadata_file)
+
+                self.n_rois = len(metadata)
+                self.roi_list = np.arange(self.n_rois)
+
+                return metadata
+
+            except Exception as e:
+                pass
 
         self.n_rois, metadata = load_metadata_from_tiff(self)
         self.roi_list = np.arange(self.n_rois)
 
         return metadata
 
-    def load_data(self) -> None:
+    def load_data(
+            self,
+            filename: str or Path
+    ) -> None:
         """
         Public method to reload imaging data with different parameters.
 
@@ -227,11 +255,11 @@ class ImagingDataset:
         -------
         None
         """
-        self._data = self._load_data()
+        self._data = self._load_data(processed_data_filename=filename)
 
     def _load_data(
         self,
-        processed_data_filename: str = "processed_data.h5"
+        processed_data_filename: str = "processed_imaging.h5"
     ) -> list:
         """
         Private method to load and process imaging data.
@@ -249,24 +277,68 @@ class ImagingDataset:
         list
             A list of processed imaging data arrays.
         """
-        processed_files = list(self.folder.glob(processed_data_filename))
-
+        processed_files = list((self.folder.parent / "processed" / "imaging").glob(processed_data_filename))
         if processed_files:
             try:
                 processed_file = processed_files[0]
                 data, _ = load_processed_arrays(processed_file)
                 return data
-            except Exception as e:
+            except Exception:
                 pass
 
-        # Fallback to loading from TIFF files
         return load_imaging_data_from_tiff(self)
+    
+    def save_metadata(
+        self,
+        save_path: Path = None,
+        overwrite: bool = False
+    ) -> None:
+        """
+        Save the imaging metadata to disk for fast loading later.
+
+        This method saves the current metadata (self.metadata) along with
+        the processing parameters used, allowing for much faster loading
+        in subsequent sessions.
+
+        Parameters
+        ----------
+        save_path : Path, optional
+            Path where to save the metadata. If None, uses a standard
+            filename in the dataset folder.
+        overwrite : bool, optional
+            Whether to overwrite existing file. Default is False.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If metadata is not loaded yet.
+
+        Example
+        -------
+        >>> dataset = ImagingDataset(folder)  # This processes the data
+        >>> dataset.save_metadata()
+        """
+        if self._metadata is None:
+            raise ValueError(
+                "No metadata to save. Load metadata first with load_metadata() "
+                "or lazy_load=False")
+
+        save_path = (
+            (self.folder.parent / "processed" / "imaging" / "metadata.json")
+            if save_path is None
+            else save_path)
+
+        save_metadata(self.metadata, save_path, overwrite)
 
     def save_processed_data(
             self,
             save_path: Path = None,
             overwrite: bool = False
-    ) -> Path:
+    ) -> None:
         """
         Save the processed imaging data to disk for fast loading later.
 
@@ -303,7 +375,8 @@ class ImagingDataset:
                 "or lazy_load=False")
 
         save_path = (
-            self.folder / "processed_data.h5" if save_path is None
+            (self.folder.parent / "processed" / "imaging" / "processed_imaging.h5")
+            if save_path is None
             else save_path)
 
         processing_params = {
@@ -316,7 +389,7 @@ class ImagingDataset:
             'n_rois': self.n_rois
         }
 
-        return save_processed_arrays(
+        save_processed_arrays(
             self._data, save_path, processing_params, overwrite)
 
     def __len__(self):
@@ -350,11 +423,12 @@ class ImagingDataset:
         Roi
             The ROI object corresponding to the specified index.
         """
-
+        
+        n_sweeps = [meta['n_sweeps'] for meta in self.metadata]
         roi_metadata = self.metadata[roi_index]
 
         z_ind = roi_metadata['z_ind']
-        start_index = sum(self.n_sweeps[:z_ind])
+        start_index = sum(n_sweeps[:z_ind])
         n_sweeps_for_roi = roi_metadata['n_sweeps']
         end_index = start_index + n_sweeps_for_roi
 
@@ -529,7 +603,7 @@ class Sweep:
     def show(
         self,
         timestamps: bool = False,
-        norm: list or tuple or np.ndarray = None
+    norm: Union[list, tuple, np.ndarray] = None
     ) -> None:
         """
         Visualize the sweep frame sequence in a real-time animation.
@@ -560,9 +634,9 @@ class Sweep:
 
     def save(
             self,
-            output_file: str or Path = None,
+            output_file: Union[str, Path] = None,
             timestamps: bool = False,
-            norm: list or tuple or np.ndarray = None
+            norm: Union[list, tuple, np.ndarray] = None
     ) -> None:
         """
         Save the sweep data as a video file.
@@ -801,7 +875,7 @@ class Channel:
     def show(
         self,
         timestamps: bool = False,
-        norm: list or tuple or np.ndarray = None
+    norm: Union[list, tuple, np.ndarray] = None
     ) -> None:
         """
         Visualize the frame sequence for the channel.
@@ -829,9 +903,9 @@ class Channel:
 
     def save(
             self,
-            output_file: str or Path = None,
+            output_file: Union[str, Path] = None,
             timestamps: bool = False,
-            norm: list or tuple or np.ndarray = None
+            norm: Union[list, tuple, np.ndarray] = None
     ) -> None:
         """
         Save the frame sequence of the channel as a video file.

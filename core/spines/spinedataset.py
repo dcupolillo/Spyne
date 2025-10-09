@@ -136,6 +136,7 @@ class SpineDataset:
         self.dendrite_threshold = dendrite_threshold
         self.min_dendrite_size = min_dendrite_size
         self.dendrite_dilation_iterations = dendrite_dilation_iterations
+        
         self.classifier_model_fn = classifier_model_fn
 
         self._load_data()
@@ -338,8 +339,9 @@ class SpineDataset:
         calcium_events_binary_CA3 : list
             Binarized calcium events for CA3 spines.
         """
+        # Use processed/spines as the default path for all .h5 files
         if path is None:
-            path = self._dataset.folder.parent
+            path = self._dataset.folder / "processed" / "spines"
 
         if not isinstance(path, Path):
             path = Path(path)
@@ -353,19 +355,23 @@ class SpineDataset:
             attr: filename for attr, filename in files.items()
             if not (path / filename).exists()}
 
+        if not existing_files:
+            raise Warning(
+                "No precomputed data files found. "
+                "Use collect_all_data() to process raw ABF files.")
+
         # Initialize missing files as empty lists
         for attr in missing_files:
             setattr(self, attr, [])
 
         # Load existing files using _load_file method
-        if existing_files:
-            for attr, filename in tqdm(
-                    existing_files.items(),
-                    desc="Loading .h5 data",
-                    total=len(existing_files)):
+        for attr, filename in tqdm(
+                existing_files.items(),
+                desc="Loading .h5 data",
+                total=len(existing_files)):
 
-                file_path = path / filename
-                self._load_file(file_path, set_attribute=True)
+            file_path = path / filename
+            self._load_file(file_path, set_attribute=True)
 
         # Update spine counts
         self.n_spines = len(getattr(self, 'spines_data', []))
@@ -381,7 +387,8 @@ class SpineDataset:
     def collect_all_data(
             self,
             save: bool = True,
-            save_path: str or Path = None) -> None:
+            save_path: str or Path = None
+    ) -> None:
         """
         Collect and process spine and dendrite segmentation data
         and collects within-spine time series
@@ -418,7 +425,8 @@ class SpineDataset:
             (e.g., z-scores, dF/F) for all spines detected during segmentation.
             """
         output_folder = (
-            self._dataset.folder.parent if save_path is None else save_path)
+            self._dataset.folder / "processed" / "spines"
+            if save_path is None else save_path)
 
         spine_datasets = self._collect_spines_and_dendrites_data(
             save=save,
@@ -517,7 +525,7 @@ class SpineDataset:
 
         if save:
             saving_folder = (
-                self._dataset.folder.parent
+                self._dataset.folder / "processed" / "spines"
                 if save_path is None else save_path)
 
             data_to_save = {
@@ -564,7 +572,8 @@ class SpineDataset:
                 "Run _collect_spines_and_dendrites_data() first.")
 
         saving_folder = (
-            self._dataset.folder.parent if save_path is None else save_path)
+            self._dataset.folder / "processed" / "spines"
+            if save_path is None else save_path)
 
         (
             self.zscores_CA3,
@@ -681,7 +690,7 @@ class SpineDataset:
 
         if save:
             saving_folder = (
-                self._dataset.folder.parent
+                self._dataset.folder / "processed" / "spines"
                 if saving_folder is None else saving_folder)
 
             calcium_events_to_save = {
@@ -840,9 +849,9 @@ class SpineDataset:
 
     def __next__(self) -> RoiSpine:
         if self._current_index < len(self._dataset):
-            roi_spine = RoiSpine(self._dataset, self._current_index)
+            roi_spine = self._get_roi(self._current_index)
             self._current_index += 1
-            return roi_segmenter
+            return roi_spine
         else:
             raise StopIteration
 
@@ -1302,59 +1311,28 @@ class Spine:
     ) -> np.ndarray:
         """
         Calculate the dF/F (delta F over F) for a specific spine.
-
-        Parameters
-        ----------
-        sweep_index : int
-            Index of the sweep to calculate dF/F for.
-        rolling_bsl : str, optional
-            Type of baseline correction to apply. Options are 'centered',
-            'forward', or 'backward'. Default is 'centered'.
-        window_sec : float, optional
-            Size of the rolling window in seconds for baseline correction.
-            Default is 0.5 seconds.
-        min_quantile : int, optional
-            Minimum quantile to use for baseline correction.
-            Default is 10 (10th percentile).
-
-        Returns
-        -------
-        np.ndarray
-            The calculated dF/F values for the specified spine and sweep.
         """
-        with tf.device(self.device):
-
-            dff_tensor = dFF(
-                n_frames=self.n_frames,
-                roi=self.roi,
-                mask=self.mask,
-                frame_rate=self.frame_rate,
-                sweep_index=sweep_index,
-                rolling_bsl=rolling_bsl,
-                window_sec=window_sec,
-                min_quantile=min_quantile,
-            )
-
-            return dff_tensor.numpy()
+        dff_tensor = dFF(
+            n_frames=self.n_frames,
+            roi=self.roi,
+            mask=self.mask,
+            frame_rate=self.frame_rate,
+            sweep_index=sweep_index,
+            rolling_bsl=rolling_bsl,
+            window_sec=window_sec,
+            min_quantile=min_quantile,
+        )
+        return dff_tensor.numpy()
 
     def ft(self) -> np.ndarray:
         """
         Get the time stamps for the spine.
-
-        Returns
-        -------
-        np.ndarray
-            The time series data for the spine.
         """
-
-        with tf.device(self.device):
-
-            timestamps_tensor = get_timestamps(
-                n_frames=self.n_frames,
-                frame_rate=self.frame_rate
-            )
-
-            return timestamps_tensor.numpy()
+        timestamps_tensor = get_timestamps(
+            n_frames=self.n_frames,
+            frame_rate=self.frame_rate
+        )
+        return timestamps_tensor.numpy()
 
     def zscore(
             self,
@@ -1362,25 +1340,13 @@ class Spine:
     ) -> np.ndarray:
         """
         Calculate the z-score for a specific spine.
-        Parameters
-        ----------
-        sweep_index : int
-            Index of the sweep to calculate z-score for.
-        Returns
-        -------
-        np.ndarray
-            The calculated z-score values for the specified spine and sweep.
         """
-
-        with tf.device(self.device):
-
-            z_tensor = z_score(
-                n_frames=self.n_frames,
-                roi=self.roi,
-                mask=self.mask,
-                frame_rate=self.frame_rate,
-                sweep_index=sweep_index
-            )
-
-            return z_tensor.numpy()
+        z_tensor = z_score(
+            n_frames=self.n_frames,
+            roi=self.roi,
+            mask=self.mask,
+            frame_rate=self.frame_rate,
+            sweep_index=sweep_index
+        )
+        return z_tensor.numpy()
 

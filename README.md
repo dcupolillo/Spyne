@@ -44,12 +44,13 @@ If you only want to use plotting and data loading features (not deep learning/se
 
 ## Features
 
-`spyne` is composed of 2 main elements:
+`spyne` is composed of 3 main elements:
 
 1. **ImagingDataset** : manages the actual imaging data and metadata;
-2. **SpineDataset** : performs spine-wise calcium imaging analysis.
+2. **SpineDataset** : performs spine segmentation and calcium imaging analysis.
+3. **EphyDataset**: manages and analyzes patch-clamp data.
 
-#### Dataset
+#### Imaging dataset
 
 The `ImagingDataset` class is the primary handler for calcium imaging data. It integrates data from 2-photon microscopy experiments, organizing data hierarchically as follows:
 
@@ -61,7 +62,13 @@ Dataset
             └── Frames
 ```
 
-#### SpineDataset
+#### Spine dataset
+
+spine dataset
+
+#### Ephy dataset
+
+ephy dataset
 
 ---
 
@@ -77,14 +84,15 @@ Dataset
 import spyne
 from pathlib import Path
 
+data_folder = Path("data")  # where your data is stored
 date = "250101"  # YYMMDD format
 cell_n = "cell0001"  #cell000n format 
-data_folder = Path("data")  # where your data is stored
 imaging_folder = data_folder / date / cell_n / "neuron"
 
-# Initialize the dataset and spine_dataset to identify spines
+# Initialize the dataseta
 dataset = spyne.ImagingDataset(imaging_folder)
 spine_dataset = spyne.SpineDataset(dataset)
+ephy_dataset = spyne.EphyDataset(dataset)
 ```
 
 ---

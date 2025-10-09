@@ -7,7 +7,7 @@ from pathlib import Path
 date = "250527"
 cell_n = "cell0003"
 data_folder = Path("data")
-imaging_folder = data_folder / date / cell_n / "neuron"
+imaging_folder = data_folder / date / cell_n
 
 # ======================
 # Dataset initialization

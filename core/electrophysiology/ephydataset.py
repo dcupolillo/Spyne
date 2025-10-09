@@ -111,6 +111,7 @@ class EphyDataset:
         dict
             A dictionary mapping attribute names to expected filenames.
         """
+        # All .npy files now live in processed/electrophysiology
         return {
             "sweep_x": "sweep_x.npy",
             "sweep_y": "sweep_y.npy",
@@ -123,6 +124,11 @@ class EphyDataset:
             "Ra": "Ra.npy",
             "Rm": "Rm.npy",
             "Iss": "Iss.npy",
+            "rise_time": "rise_time.npy",
+            "decay_time": "decay_time.npy",
+            "tau_sec": "tau_sec.npy",
+            "BLA_EPSCs": "BLA_EPSCs.npy",
+            "BLA_EPSCs_x": "BLA_EPSCs_x.npy",
         }
 
     def _load_metadata(self) -> list:
@@ -183,8 +189,9 @@ class EphyDataset:
             Each array contains the corresponding channel's
             data for all sweeps.
         """
+        # Use processed/electrophysiology as the default path for all .npy files
         if path is None:
-            path = self._dataset.folder.parent
+            path = self._dataset.folder / "processed" / "electrophysiology"
 
         if not isinstance(path, Path):
             path = Path(path)
@@ -197,23 +204,81 @@ class EphyDataset:
         missing_files = {
             attr: filename for attr, filename in files.items()
             if not (path / filename).exists()}
+        
+        if not existing_files:
+            raise Warning(
+                "No precomputed data files found. "
+                "Use collect_all_data() to process raw ABF files.")
 
         # Initialize missing files as empty lists
         for attr in missing_files:
             setattr(self, attr, [])
 
         # Load existing files using _load_file method
-        if existing_files:
-            for attr, filename in tqdm(
-                    existing_files.items(),
-                    desc="Loading .h5 data",
-                    total=len(existing_files)):
+        for attr, filename in tqdm(
+                existing_files.items(),
+                desc="Loading .h5 data",
+                total=len(existing_files)):
 
-                file_path = path / filename
-                self._load_file(file_path, set_attribute=True)
+            file_path = path / filename
+            self._load_file(file_path, set_attribute=True)
 
-        # TODO: For each missing file, computes the missing property
-        return load_data_from_abf(self)
+    def collect_all_data(
+            self,
+            save: bool = True,
+            save_path: str or Path = None
+    ) -> None:
+        """
+        Process all ABF files to extract electrophysiology data,
+        compute passive properties, and detect synaptic events.
+        Optionally saves the processed data as .npy files.
+
+        Parameters
+        ----------
+        save : bool, optional
+            Whether to save the processed data as .npy files.
+            Default is True.
+        save_path : str or Path, optional
+            Path to the directory where processed data should be saved.
+            If None, saves to the dataset's parent directory.
+        """
+        output_folder = (
+            self._dataset.folder / "processed" / "electrophysiology"
+            if save_path is None else save_path)
+
+        self._collect_timeseries(save, save_path=output_folder)
+        self._collect_passive_properties(save, save_path=output_folder)
+        self._collect_BLA_EPSCs(save, save_path=output_folder)
+        self._collect_Isteps(save, save_path=output_folder)
+
+    def _collect_timeseries(
+            self,
+            save:bool,
+            save_path: str or Path = None
+    ) -> None:
+        """
+        """
+        saving_folder = (
+            self._dataset.folder / "processed" / "electrophysiology"
+            if save_path is None else save_path)
+
+        self.sweep_x, self.sweep_y, self.sweep_cmd, \
+            self.sweep_scanner, self.sweep_stim, \
+            self.sweep_led, self.sweep_pmtgate = load_data_from_abf(self)
+
+        if save:
+            data_to_save = {
+                "sweep_x": self.sweep_x,
+                "sweep_y": self.sweep_y,
+                "sweep_cmd": self.sweep_cmd,
+                "sweep_scanner": self.sweep_scanner,
+                "sweep_stim": self.sweep_stim,
+                "sweep_led": self.sweep_led,
+                "sweep_pmtgate": self.sweep_pmtgate,
+            }
+
+            for filename, data in data_to_save.items():
+                np.save(saving_folder / f"{filename}.npy", data)
 
     def _collect_passive_properties(
             self,
@@ -250,7 +315,7 @@ class EphyDataset:
 
         if save:
             saving_folder = (
-                self._dataset.folder.parent
+                self._dataset.folder / "processed" / "electrophysiology"
                 if save_path is None else save_path)
 
             data_to_save = {
@@ -258,12 +323,19 @@ class EphyDataset:
                 "Ra": self.Ra,
                 "Rm": self.Rm,
                 "Iss": self.Iss,
+                "rise_time": self.rise_time,
+                "decay_time": self.decay_time,
+                "tau_sec": self.tau_sec,
             }
 
             for filename, data in data_to_save.items():
                 np.save(saving_folder / f"{filename}.npy", data)
 
-    def _collect_BLA_EPSCs(self) -> None:
+    def _collect_BLA_EPSCs(
+            self,
+            save: bool,
+            save_path: str or Path = None
+    ) -> None:
         """
         This method processes each ABF file to detect BLA EPSCs
         using the BLA_EPSCs function from the analysis module.
@@ -295,7 +367,25 @@ class EphyDataset:
         self.BLA_EPSCs_x = np.stack(self.BLA_EPSCs_x, axis=0)
         self.BLA_amplitudes = np.stack(self.BLA_amplitudes, axis=0)
 
-    def _collect_Isteps(self) -> None:
+        if save:
+            saving_folder = (
+                self._dataset.folder / "processed" / "electrophysiology"
+                if save_path is None else save_path)
+
+            data_to_save = {
+                "BLA_EPSCs": self.BLA_EPSCs,
+                "BLA_EPSCs_x": self.BLA_EPSCs_x,
+                "BLA_amplitudes": self.BLA_amplitudes,
+            }
+
+            for filename, data in data_to_save.items():
+                np.save(saving_folder / f"{filename}.npy", data)
+
+    def _collect_Isteps(
+            self,
+            save: bool,
+            save_path: str or Path = None
+    ) -> None:
         """
         This method computes I-V relationship and firing frequency
         from the I-step protocol ABF file. In addition, it unpacks
@@ -310,6 +400,31 @@ class EphyDataset:
             self.downstroke_t, self.downstroke_v,
             self.width, self.peak_amplitude
         ) = unpack_spike_dfs(self.spikes)
+
+        if save:
+            saving_folder = (
+                self._dataset.folder / "processed" / "electrophysiology"
+                if save_path is None else save_path)
+
+            data_to_save = {
+                "Isteps": self.Isteps,
+                "IF": self.IF,
+                "IV": self.IV,
+                "spikes": self.spikes,
+                "peaks_v": self.peaks_v,
+                "peaks_t": self.peaks_t,
+                "threshold_t": self.threshold_t,
+                "threshold_v": self.threshold_v,
+                "upstroke_t": self.upstroke_t,
+                "upstroke_v": self.upstroke_v,
+                "downstroke_t": self.downstroke_t,
+                "downstroke_v": self.downstroke_v,
+                "width": self.width,
+                "peak_amplitude": self.peak_amplitude,
+            }
+
+            for filename, data in data_to_save.items():
+                np.save(saving_folder / f"{filename}.npy", data)
 
     def __getitem__(self, roi_index: int) -> None:
         if roi_index not in self._dataset.roi_list:
