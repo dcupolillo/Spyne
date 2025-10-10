@@ -182,7 +182,6 @@ def load_metadata_from_tiff(
                     roi_in_scanfield_object = (
                         dataset_instance._sf.neuron[file_n][n_roi_in_z])
                 except:
-                    print(file_n, file_path)
                     break
 
                 z = float(roi['name'].split(",")[0].split(" = ")[-1])

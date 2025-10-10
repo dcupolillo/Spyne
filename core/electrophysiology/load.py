@@ -203,3 +203,41 @@ def get_digital_output_list(abf_path):
         adc_list.extend(sweep_adcs)
 
     return adc_list
+
+def find_test_pulse_window(
+        abf_path: str or Path,
+) -> tuple:
+    """
+    Find the start and end times of the test pulse in an ABF file.
+
+    Parameters
+    ----------
+    abf_path : str or Path
+        Path to the ABF file.
+
+    Returns
+    -------
+    tuple
+        A tuple containing the start and end times of the test pulse in seconds.
+    """
+
+    abf = pyabf.ABF(abf_path)
+    adc_names = abf.adcNames
+
+    if 'IN 0' not in adc_names:
+        raise ValueError("Channel 'IN 0' not found in ADC names.")
+
+    abf.setSweep(0, channel=adc_names.index('IN 0'))
+
+    epochs_starts = abf.sweepEpochs.p1s
+    epochs_ends = abf.sweepEpochs.p2s
+    epochs_levels = abf.sweepEpochs.levels
+
+    # find index of positive level
+    max_level = max(epochs_levels)
+    epoch_index = epochs_levels.index(max_level)
+
+    test_pulse_start_time = epochs_starts[epoch_index]
+    test_pulse_end_time = epochs_ends[epoch_index]
+
+    return max_level, test_pulse_start_time, test_pulse_end_time

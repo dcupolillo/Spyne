@@ -23,11 +23,12 @@ class ImagingDataset:
     Manager for imaging data from dendritic ROIs acquired with ScanImage.
 
     This class loads and processes imaging data from a single neuron,
-    including its metadata and corresponding acquisition files. It applies a
-    3D median filter to the raw data and corrects the gating-PMT black stripe
+    including its metadata and corresponding acquisition files. 
+    It first attempts to load precomputed data, and if not available,
+    loads raw data and metadata, applies a 3D median filter and corrects the gating-PMT
     artifact caused by their rapid switching.
 
-    Files includes grouped coplanar ROIs, stacked in vertical.
+    Files include grouped coplanar ROIs, stacked in vertical.
     Cropping to individual ROIs is provided in the Roi class.
 
     Note
@@ -45,9 +46,6 @@ class ImagingDataset:
     >>> paths = "path/to/your/folder"
     >>> dataset = spyne.ImagingDataset(paths)
     >>> print(f"Number of ROIs: {len(dataset)}")
-
-    >>> # For ultra-fast loading with minimal filtering:
-    >>> dataset = spyne.ImagingDataset(paths, kernel_size_um=(0.0, 0.0, 1))
     """
 
     def __init__(
@@ -61,8 +59,23 @@ class ImagingDataset:
 
         Parameters
         ----------
-        paths : NeuronPath
-            Path manager containing paths to imaging and associated files.
+        folder : str or Path
+            Path to the main folder containing imaging data.
+            Requires a folder structure like:
+            └─ date (YYMMDD, e.g. 250101)
+               └─ cell_n (e.g. cell_0001)
+                  ├─ raw
+                  │  ├─ tiff
+                  │  ├─ roi
+                  │  ├─ abf
+                  │  ├─ stack_file.tif
+                  │  └─ morphology.swc
+                  ├─ processed (where it looks for pre-saved data)
+                  │  ├─ electrophy
+                  │  ├─ imaging
+                  │  ├─ morphology
+                  │  └─ spines
+                  └─ analysis
         kernel_size_um : tuple, optional
             Size of the 3D median filter kernel as
             (spatial_x, spatial_y, temporal).
@@ -83,16 +96,34 @@ class ImagingDataset:
         Exception
             If the imaging path is invalid, non-existent, or empty.
         """
-
+        
         self._foldercheck(folder=Path(folder))
         self.folder = Path(folder)
-
-        # New folder structure: /raw/imaging/date/cell_n
-        self.date, self.cell_number = self.folder.parts[-2:]
-        self.name = f"{self.date}_{self.cell_number}"
+            
+        try:
+            self.date, self.cell_number = self.folder.parts[-2:]
+            self.name = f"{self.date}_{self.cell_number}"
+        except Exception:
+            self.name = self.folder.name
 
         raw_tiff_folder = self.folder / "raw" / "tiff"
         raw_abf_folder = self.folder / "raw" / "abf"
+        
+        self._tiff_or_abf_foldercheck(folder=raw_tiff_folder, which='tiff')
+        self._tiff_or_abf_foldercheck(folder=raw_abf_folder, which='abf')
+        
+        _swc_and_stack_dir = self.folder / "raw" 
+        stack_file = (
+            next((f for f in _swc_and_stack_dir.glob("*.tif")
+            if f.suffix.lower() in ('.tif', '.tiff')
+            and 'stack' in f.stem.lower()), None))
+        swc_file = next(_swc_and_stack_dir.glob('*.swc'), None)
+
+        if swc_file is not None and not Path(swc_file).exists():
+            raise Exception(f"SWC file not found at {swc_file}.")
+
+        if stack_file is not None and not Path(stack_file).exists():
+            raise Exception(f"Stack file not found at {stack_file}.")
 
         self.file_list = [
             file_path for file_path in raw_tiff_folder.rglob('*')
@@ -118,23 +149,14 @@ class ImagingDataset:
         self.pmt_artifact_detection_threshold = (
             pmt_artifact_detection_threshold)
 
-        _swc_and_stack_dir = self.folder / "raw"
-        _stack_file = next(
-            (f for f in _swc_and_stack_dir.glob("*.tif")
-             if f.suffix.lower() in ('.tif', '.tiff')
-             and 'stack' in f.stem.lower()), None)
-        _stack = rp.Stack(_stack_file) if _stack_file else None
-
-
-        _swc_file = next(_swc_and_stack_dir.glob('*.swc'), None)
-
-        self._morph = rp.Morphology(_swc_file, _stack) if _swc_file and _stack else None
+        stack = rp.Stack(stack_file) if stack_file else None
+        self._morph = rp.Morphology(
+            swc_file, stack) if swc_file and stack else None
         self._sf = rp.Scanfields(self._morph) if self._morph else None
 
         self.metadata = self._load_metadata()
-        self.data = self._load_data()
-
         self.file_to_roi_map = create_file_to_roi_map(self)
+        self.data = self._load_data()
 
     def _foldercheck(self, folder: Path) -> None:
         """
@@ -154,6 +176,42 @@ class ImagingDataset:
 
         if not any(folder.iterdir()):
             raise Exception(f"{folder} is empty.")
+    
+    def _tiff_or_abf_foldercheck(
+            self,
+            folder: Path,
+            which: str
+    ) -> None:
+        """
+        Check if the TIFF folder path is valid.
+
+        Raises
+        ------
+        Exception
+            If the TIFF folder path is invalid, non-existent, or empty.
+        """
+        if which not in ('tiff', 'abf'):
+            raise ValueError("'which' must be either 'tiff' or 'abf'.")
+
+        if not folder.exists():
+            raise Exception(f"{folder} does not exist.")
+
+        if not folder.is_dir():
+            raise Exception(f"{folder} must be a path to a FOLDER.")
+
+        if not any(folder.iterdir()):
+            raise Exception(f"{folder} is empty.")
+        
+        suffixes = ('.tif', '.tiff')  if which == 'tiff' else ('.abf',)
+
+        # Check if it contains z folders with tiff files in them
+        z_folders = [
+            file for file in folder.iterdir() if file.is_dir() and any(
+                sub_file.suffix.lower() in suffixes
+                for sub_file in file.iterdir())]
+        if not z_folders:
+            raise Exception(
+                f"{folder} does not contain any z folders with TIFF files.")
 
     def _kernelcheck(self, kernel) -> None:
         """
@@ -182,7 +240,7 @@ class ImagingDataset:
 
     def load_metadata(
         self,
-        filename: str or Path = "metadata.json"
+        filename: str or Path
     ) -> None:
         """
         Public method to load imaging metadata with different parameters.
@@ -191,7 +249,7 @@ class ImagingDataset:
         Parameters
         ----------
         filename : str or Path
-            Filename to load metadata from. Default is "metadata.json".
+            Filename to load metadata from.
 
         Returns
         -------
@@ -201,7 +259,7 @@ class ImagingDataset:
 
     def _load_metadata(
         self,
-        metadata_filename: str = "metadata.json"
+        metadata_filename: str or Path = "metadata.h5"
     ) -> list:
         """
         Private method to load metadata for all ROIs.
@@ -214,20 +272,19 @@ class ImagingDataset:
         list
             A list of metadata dictionaries for all ROIs.
         """
-        metadata_files = list(self.folder.glob(metadata_filename))
 
-        if metadata_files:
-            try:
-                metadata_file = metadata_files[0]
-                metadata = load_saved_metadata(metadata_file)
+        metadata_filename = self.folder / "processed" / "imaging" / metadata_filename
 
-                self.n_rois = len(metadata)
-                self.roi_list = np.arange(self.n_rois)
+        try:
+            metadata = load_saved_metadata(metadata_filename)
 
-                return metadata
+            self.n_rois = len(metadata)
+            self.roi_list = np.arange(self.n_rois)
 
-            except Exception as e:
-                pass
+            return metadata
+
+        except Exception as e:
+            pass
 
         self.n_rois, metadata = load_metadata_from_tiff(self)
         self.roi_list = np.arange(self.n_rois)
@@ -259,7 +316,7 @@ class ImagingDataset:
 
     def _load_data(
         self,
-        processed_data_filename: str = "processed_imaging.h5"
+        processed_data_filename: str or Path = "processed_imaging.h5"
     ) -> list:
         """
         Private method to load and process imaging data.
@@ -277,14 +334,15 @@ class ImagingDataset:
         list
             A list of processed imaging data arrays.
         """
-        processed_files = list((self.folder.parent / "processed" / "imaging").glob(processed_data_filename))
-        if processed_files:
-            try:
-                processed_file = processed_files[0]
-                data, _ = load_processed_arrays(processed_file)
-                return data
-            except Exception:
-                pass
+
+        processed_data_filename = (
+            self.folder / "processed" / "imaging" / processed_data_filename)
+
+        try:
+            data, _ = load_processed_arrays(processed_data_filename)
+            return data
+        except Exception:
+            pass
 
         return load_imaging_data_from_tiff(self)
     
@@ -322,13 +380,9 @@ class ImagingDataset:
         >>> dataset = ImagingDataset(folder)  # This processes the data
         >>> dataset.save_metadata()
         """
-        if self._metadata is None:
-            raise ValueError(
-                "No metadata to save. Load metadata first with load_metadata() "
-                "or lazy_load=False")
 
         save_path = (
-            (self.folder.parent / "processed" / "imaging" / "metadata.json")
+            (self.folder / "processed" / "imaging" / "metadata.h5")
             if save_path is None
             else save_path)
 
@@ -375,7 +429,7 @@ class ImagingDataset:
                 "or lazy_load=False")
 
         save_path = (
-            (self.folder.parent / "processed" / "imaging" / "processed_imaging.h5")
+            (self.folder / "processed" / "imaging" / "processed_imaging.h5")
             if save_path is None
             else save_path)
 

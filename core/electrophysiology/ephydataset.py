@@ -3,17 +3,17 @@
 
 from __future__ import annotations
 from pathlib import Path
+import flammkuchen as fl
 from tqdm import tqdm
 import numpy as np
 from functools import cache
 import tensorflow as tf
 from spyne.core.electrophysiology.load import (
     load_metadata_from_abf, load_data_from_abf, find_test_pulse_window)
+from spyne.core.electrophysiology.io import save_metadata
 from spyne.core.electrophysiology.analysis.pyabf_passive_props import (
     analyze_I_steps, unpack_spike_dfs, passive_properties)
 from spyne.core.electrophysiology.analysis.synaptic_events import BLA_EPSCs
-
-
 from spyne.core.imaging.imagingdataset import ImagingDataset
 
 
@@ -52,8 +52,9 @@ class EphyDataset:
         self._dataset = dataset
         self.abf_file_list = self._dataset.abf_file_list
 
+        I_step_folder = self._dataset.folder / "raw"
         self.Istep_filename = [
-            fname for fname in self._dataset.folder.parent.glob("*.abf")
+            fname for fname in I_step_folder.glob("*.abf")
         ][0]
 
         self.model_fn = model_fn
@@ -74,12 +75,13 @@ class EphyDataset:
             for n, roi in enumerate(self._dataset.metadata)}
 
         self.metadata = self._load_metadata()
-        self._data = self._load_data()
+        self._load_data()
+        # self._data = self._load_data()
 
-        if self._data is not None:
-            self.sweep_x, self.sweep_y, self.sweep_cmd, \
-                self.sweep_scanner, self.sweep_stim, \
-                self.sweep_led, self.sweep_pmtgate = self._data
+        # if self._data is not None:
+        #     self.sweep_x, self.sweep_y, self.sweep_cmd, \
+        #         self.sweep_scanner, self.sweep_stim, \
+        #         self.sweep_led, self.sweep_pmtgate = self._data
 
         self.test_pulse_level, self.test_pulse_start, \
             self.test_pulse_end = find_test_pulse_window(self.abf_file_list[0])
@@ -130,8 +132,30 @@ class EphyDataset:
             "BLA_EPSCs": "BLA_EPSCs.npy",
             "BLA_EPSCs_x": "BLA_EPSCs_x.npy",
         }
+    
+    def load_metadata(
+        self,
+        filename: str or Path
+    ) -> None:
+        """
+        Public method to load imaging metadata with different parameters.
+        This method allows you to manually load imaging metadata.
 
-    def _load_metadata(self) -> list:
+        Parameters
+        ----------
+        filename : str or Path
+            Filename to load metadata from.
+
+        Returns
+        -------
+        None
+        """
+        self._metadata = self._load_metadata(metadata_filename=filename)
+
+    def _load_metadata(
+        self,
+        metadata_filename: str or Path = "metadata.h5"
+    ) -> list:
         """
         Load metadata for all z planes.
 
@@ -144,7 +168,7 @@ class EphyDataset:
         list
             A list of metadata dictionaries for each ABF file.
         """
-
+        metadata_filename = self._dataset.folder / "processed" / "imaging" / metadata_filename
         metadata_list = load_metadata_from_abf(self)
 
         for metadata in metadata_list:
@@ -154,6 +178,48 @@ class EphyDataset:
                 getattr(self, key).append(value)
 
         return metadata_list
+    
+    def save_metadata(
+        self,
+        save_path: Path = None,
+        overwrite: bool = False
+    ) -> None:
+        """
+        Save the ephy metadata to disk for fast loading later.
+
+        This method saves the current metadata (self.metadata),
+        allowing for much faster loading in subsequent sessions.
+
+        Parameters
+        ----------
+        save_path : Path, optional
+            Path where to save the metadata. If None, uses a standard
+            filename in the dataset folder.
+        overwrite : bool, optional
+            Whether to overwrite existing file. Default is False.
+
+        Returns
+        -------
+        None
+
+        Raises
+        ------
+        ValueError
+            If metadata is not loaded yet.
+
+        Example
+        -------
+        >>> dataset = ImagingDataset(folder)
+        >>> ephy = EphyDataset(dataset)  # This processes the data
+        >>> ephy.save_metadata()
+        """
+
+        save_path = (
+            (self.folder / "processed" / "electrophy" / "metadata.h5")
+            if save_path is None
+            else save_path)
+
+        save_metadata(self.metadata, save_path, overwrite)
 
     def _load_data(
             self,
@@ -204,24 +270,20 @@ class EphyDataset:
         missing_files = {
             attr: filename for attr, filename in files.items()
             if not (path / filename).exists()}
-        
-        if not existing_files:
-            raise Warning(
-                "No precomputed data files found. "
-                "Use collect_all_data() to process raw ABF files.")
 
         # Initialize missing files as empty lists
         for attr in missing_files:
             setattr(self, attr, [])
 
         # Load existing files using _load_file method
-        for attr, filename in tqdm(
-                existing_files.items(),
-                desc="Loading .h5 data",
-                total=len(existing_files)):
+        if existing_files:
+            for attr, filename in tqdm(
+                    existing_files.items(),
+                    desc="Loading .h5 data",
+                    total=len(existing_files)):
 
-            file_path = path / filename
-            self._load_file(file_path, set_attribute=True)
+                file_path = path / filename
+                self._load_file(file_path, set_attribute=True)
 
     def collect_all_data(
             self,
@@ -253,7 +315,7 @@ class EphyDataset:
 
     def _collect_timeseries(
             self,
-            save:bool,
+            save: bool,
             save_path: str or Path = None
     ) -> None:
         """
@@ -267,6 +329,10 @@ class EphyDataset:
             self.sweep_led, self.sweep_pmtgate = load_data_from_abf(self)
 
         if save:
+            saving_folder = Path(saving_folder)
+            saving_folder.mkdir(parents=True, exist_ok=True)
+            
+            
             data_to_save = {
                 "sweep_x": self.sweep_x,
                 "sweep_y": self.sweep_y,
@@ -277,8 +343,8 @@ class EphyDataset:
                 "sweep_pmtgate": self.sweep_pmtgate,
             }
 
-            for filename, data in data_to_save.items():
-                np.save(saving_folder / f"{filename}.npy", data)
+            for key, value in data_to_save.items():
+                fl.save(saving_folder / f"{key}.h5", value)
 
     def _collect_passive_properties(
             self,
@@ -314,10 +380,13 @@ class EphyDataset:
             self.test_pulse_level)
 
         if save:
-            saving_folder = (
-                self._dataset.folder / "processed" / "electrophysiology"
-                if save_path is None else save_path)
 
+            saving_folder = (
+                self._dataset.folder / "analysis" / "electrophysiology"
+                if save_path is None else save_path)
+            saving_folder = Path(saving_folder)
+            saving_folder.mkdir(parents=True, exist_ok=True)
+            
             data_to_save = {
                 "Ih": self.Ih,
                 "Ra": self.Ra,
@@ -327,9 +396,9 @@ class EphyDataset:
                 "decay_time": self.decay_time,
                 "tau_sec": self.tau_sec,
             }
-
-            for filename, data in data_to_save.items():
-                np.save(saving_folder / f"{filename}.npy", data)
+            
+            for key, value in data_to_save.items():
+                fl.save(saving_folder / f"{key}.h5", value)
 
     def _collect_BLA_EPSCs(
             self,
@@ -369,17 +438,19 @@ class EphyDataset:
 
         if save:
             saving_folder = (
-                self._dataset.folder / "processed" / "electrophysiology"
+                self._dataset.folder / "analysis" / "electrophysiology"
                 if save_path is None else save_path)
-
+            saving_folder = Path(saving_folder)
+            saving_folder.mkdir(parents=True, exist_ok=True)
+            
             data_to_save = {
                 "BLA_EPSCs": self.BLA_EPSCs,
                 "BLA_EPSCs_x": self.BLA_EPSCs_x,
                 "BLA_amplitudes": self.BLA_amplitudes,
             }
-
-            for filename, data in data_to_save.items():
-                np.save(saving_folder / f"{filename}.npy", data)
+            
+            for key, value in data_to_save.items():
+                fl.save(saving_folder / f"{key}.h5", value)
 
     def _collect_Isteps(
             self,
@@ -405,7 +476,9 @@ class EphyDataset:
             saving_folder = (
                 self._dataset.folder / "processed" / "electrophysiology"
                 if save_path is None else save_path)
-
+            saving_folder = Path(saving_folder)
+            saving_folder.mkdir(parents=True, exist_ok=True)
+            
             data_to_save = {
                 "Isteps": self.Isteps,
                 "IF": self.IF,
@@ -422,9 +495,9 @@ class EphyDataset:
                 "width": self.width,
                 "peak_amplitude": self.peak_amplitude,
             }
-
-            for filename, data in data_to_save.items():
-                np.save(saving_folder / f"{filename}.npy", data)
+            
+            for key, value in data_to_save.items():
+                fl.save(saving_folder / f"{key}.h5", value)
 
     def __getitem__(self, roi_index: int) -> None:
         if roi_index not in self._dataset.roi_list:

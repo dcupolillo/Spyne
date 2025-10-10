@@ -8,7 +8,6 @@ from pathlib import Path
 import cv2
 import numpy as np
 import flammkuchen as fl
-import json
 import time
 
 
@@ -563,9 +562,10 @@ def save_metadata(
         raise FileExistsError(
             f"{save_path} already exists. Use overwrite=True to overwrite.")
 
-    with open(save_path, "w", encoding="utf-8") as f:
-        json.dump(metadata, f, indent=2)
-    print(f"✓ Saved metadata to {save_path}.")
+    # Save metadata using flammkuchen (HDF5)
+    fl.save(save_path, metadata)
+    file_size_mb = save_path.stat().st_size / (1024**2)
+    print(f"✓ Saved metadata ({file_size_mb:.2f} MB) to {save_path}.")
     return
 
 
@@ -586,9 +586,12 @@ def load_saved_metadata(
         The loaded metadata dictionary.
     """
     load_path = Path(load_path)
+    
     if not load_path.exists():
         raise FileNotFoundError(f"Metadata file not found: {load_path}")
-    with open(load_path, "r", encoding="utf-8") as f:
-        metadata = json.load(f)
+    
+    metadata = fl.load(load_path)
+    
     print(f"✓ Loaded metadata from {load_path}.")
+    
     return metadata

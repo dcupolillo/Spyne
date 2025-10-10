@@ -355,23 +355,19 @@ class SpineDataset:
             attr: filename for attr, filename in files.items()
             if not (path / filename).exists()}
 
-        if not existing_files:
-            raise Warning(
-                "No precomputed data files found. "
-                "Use collect_all_data() to process raw ABF files.")
-
         # Initialize missing files as empty lists
         for attr in missing_files:
             setattr(self, attr, [])
 
         # Load existing files using _load_file method
-        for attr, filename in tqdm(
-                existing_files.items(),
-                desc="Loading .h5 data",
-                total=len(existing_files)):
+        if existing_files:
+            for attr, filename in tqdm(
+                    existing_files.items(),
+                    desc="Loading .h5 data",
+                    total=len(existing_files)):
 
-            file_path = path / filename
-            self._load_file(file_path, set_attribute=True)
+                file_path = path / filename
+                self._load_file(file_path, set_attribute=True)
 
         # Update spine counts
         self.n_spines = len(getattr(self, 'spines_data', []))
@@ -490,6 +486,9 @@ class SpineDataset:
         - Timeseries data collection extracts relevant information
             (e.g., z-scores, dF/F) for all spines detected during segmentation.
         """
+        output_folder = (
+            self._dataset.folder / "processed" / "spines"
+            if save_path is None else save_path)
 
         (
             spine_datasets,
@@ -538,7 +537,7 @@ class SpineDataset:
             }
 
             for filename, data in data_to_save.items():
-                self._save_to_h5(data, saving_folder, filename)
+                self._save_to_h5(data, output_folder, filename)
 
         return spine_datasets
 
@@ -605,7 +604,7 @@ class SpineDataset:
     def _calcium_events_predictions(
             self,
             save: bool,
-            saving_folder: str or Path = None
+            save_path: str or Path = None
     ) -> None:
         """
         Detect calcium events in spines using a trained neural network
@@ -663,6 +662,13 @@ class SpineDataset:
         #         "Run collect_all_data() first."
         #     )
 
+        output_folder = (
+            self._dataset.folder / "analysis" / "spines"
+            if save_path is None else save_path)
+
+        if not output_folder.exists():
+            output_folder.mkdir(parents=True)
+
         self.calcium_event_probabilities_BLA = detect_calcium_events(
             config=self.classification_params,
             zscores=self.zscores_BLA,
@@ -689,9 +695,6 @@ class SpineDataset:
             if sum(spine) > 0)
 
         if save:
-            saving_folder = (
-                self._dataset.folder / "processed" / "spines"
-                if saving_folder is None else saving_folder)
 
             calcium_events_to_save = {
                 "calcium_event_probabilities_BLA.h5":
@@ -705,7 +708,7 @@ class SpineDataset:
             }
 
             for filename, data in calcium_events_to_save.items():
-                self._save_to_h5(data, saving_folder, filename)
+                self._save_to_h5(data, output_folder, filename)
 
     def _save_to_h5(
             self,
