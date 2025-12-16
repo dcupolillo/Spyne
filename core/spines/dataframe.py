@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 def to_dataframe(
     spine_dataset: SpineDataset,
-        n_events_threshold: int = 1
+    n_events_threshold: int = 1
 ) -> pd.DataFrame:
     """
     Convert spine data from a SpineDataset into a pandas DataFrame.
@@ -338,6 +338,51 @@ def add_nearest_neighbor_distance_column(
                 f'nearest_neighbor_distance_{input_identity}'
             ] = min_dist if min_dist != np.inf else np.nan
 
+    return dataframe
+
+
+def add_nearest_neighbor_distance_column_fast(
+        dataframe: pd.DataFrame,
+        input_identity: str,
+        node_map: dict,
+        paths_to_root: dict
+) -> pd.DataFrame:
+    """
+    Add a 'nearest_neighbor_distance' column using precomputed node_map and paths_to_root.
+    """
+
+    dataframe = dataframe.copy()
+    dataframe[f"nearest_neighbor_distance_{input_identity}"] = np.nan
+    dataframe_by_input = dataframe[dataframe[f'is_{input_identity}'] == True]
+    grouped = dataframe_by_input.groupby('branch_id')
+    
+    for _, branch_df in grouped:
+    
+        spine_indices = branch_df.index.to_list()
+        node_ids = branch_df['closest_node_id'].to_list()
+        n = len(spine_indices)
+    
+        if n < 2:
+            dataframe.loc[
+                spine_indices[0],
+                f'nearest_neighbor_distance_{input_identity}'
+            ] = np.nan
+            continue
+    
+        for i, idx in enumerate(spine_indices):
+            min_dist = np.inf
+            for j in range(len(spine_indices)):
+                if i == j:
+                    continue
+                d = distance_along_neurite(node_map, paths_to_root, node_ids[i], node_ids[j])
+                if d > 0 and d < min_dist:
+                    min_dist = d
+    
+            dataframe.loc[
+                idx,
+                f'nearest_neighbor_distance_{input_identity}'
+            ] = min_dist if min_dist != np.inf else np.nan
+    
     return dataframe
 
 

@@ -115,23 +115,91 @@ class EphyDataset:
         """
         # All .npy files now live in processed/electrophysiology
         return {
-            "sweep_x": "sweep_x.npy",
-            "sweep_y": "sweep_y.npy",
-            "sweep_cmd": "sweep_cmd.npy",
-            "sweep_scanner": "sweep_scanner.npy",
-            "sweep_stim": "sweep_stim.npy",
-            "sweep_led": "sweep_led.npy",
-            "sweep_pmtgate": "sweep_pmtgate.npy",
-            "Ih": "Ih.npy",
-            "Ra": "Ra.npy",
-            "Rm": "Rm.npy",
-            "Iss": "Iss.npy",
-            "rise_time": "rise_time.npy",
-            "decay_time": "decay_time.npy",
-            "tau_sec": "tau_sec.npy",
-            "BLA_EPSCs": "BLA_EPSCs.npy",
-            "BLA_EPSCs_x": "BLA_EPSCs_x.npy",
+
+            "sweep_x": "processed/electrophysiology/sweep_x.h5",
+            "sweep_y": "processed/electrophysiology/sweep_y.h5",
+            "sweep_cmd": "processed/electrophysiology/sweep_cmd.h5",
+            "sweep_scanner": "processed/electrophysiology/sweep_scanner.h5",
+            "sweep_stim": "processed/electrophysiology/sweep_stim.h5",
+            "sweep_led": "processed/electrophysiology/sweep_led.h5",
+            "sweep_pmtgate": "processed/electrophysiology/sweep_pmtgate.h5",
+            "Ih": "analysis/electrophysiology/Ih.h5",
+            "Ra": "analysis/electrophysiology/Ra.h5",
+            "Rm": "analysis/electrophysiology/Rm.h5",
+            "Iss": "analysis/electrophysiology/Iss.h5",
+            "rise_time": "analysis/electrophysiology/rise_time.h5",
+            "decay_time": "analysis/electrophysiology/decay_time.h5",
+            "tau_sec": "analysis/electrophysiology/tau_sec.h5",
+            "BLA_EPSCs": "analysis/electrophysiology/BLA_EPSCs.h5",
+            "BLA_EPSCs_x": "analysis/electrophysiology/BLA_EPSCs_x.h5",
         }
+    
+    def _load_file(
+            self,
+            filepath: str or Path,
+            set_attribute: bool = True
+    ) -> tuple[str, any]:
+        """
+        Load a single .h5 file and optionally set it as an instance attribute.
+
+        This method serves as a building block for loading individual
+        data files. It can infer the attribute name from the filename
+        using the files mapping or load data from any .h5 file path.
+
+        Parameters
+        ----------
+        filepath : str or Path
+            Path to the .h5 file to load.
+        set_attribute : bool, optional
+            Whether to set the loaded data as an instance attribute.
+            Default is True.
+
+        Returns
+        -------
+        tuple[str, any]
+            Tuple containing (attribute_name, loaded_data).
+            If the filename is not in the mapping, attribute_name will be
+            the filename without extension.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the specified file does not exist.
+        ValueError
+            If the file is not a .h5 file.
+        """
+        if not isinstance(filepath, Path):
+            filepath = Path(filepath)
+
+        if not filepath.exists():
+            raise FileNotFoundError(f"File {filepath} does not exist")
+
+        if not filepath.suffix == '.h5':
+            raise ValueError(f"File {filepath} must be a .h5 file")
+
+        filename = filepath.name
+        attribute_name = None
+
+        for attr, mapped_filename in self._files_mapping.items():
+            if filename == mapped_filename:
+                attribute_name = attr
+                break
+
+        if attribute_name is None:
+            attribute_name = filepath.stem
+
+        try:
+            data = fl.load(filepath)
+
+            if set_attribute:
+                setattr(self, attribute_name, data)
+
+            return attribute_name, data
+
+        except Exception:
+            if set_attribute:
+                setattr(self, attribute_name, [])
+            return attribute_name, []
     
     def load_metadata(
         self,
@@ -168,7 +236,23 @@ class EphyDataset:
         list
             A list of metadata dictionaries for each ABF file.
         """
-        metadata_filename = self._dataset.folder / "processed" / "imaging" / metadata_filename
+        metadata_filename = (
+            self._dataset.folder / "processed" / "electrophysiology" / metadata_filename
+        )
+        
+        try:
+            metadata = fl.load(metadata_filename)
+
+            for key, value in metadata.items():
+                if not hasattr(self, key):
+                    setattr(self, key, [])
+                getattr(self, key).append(value)
+
+            return metadata
+        
+        except Exception as e:
+            pass
+        
         metadata_list = load_metadata_from_abf(self)
 
         for metadata in metadata_list:
@@ -215,7 +299,7 @@ class EphyDataset:
         """
 
         save_path = (
-            (self.folder / "processed" / "electrophy" / "metadata.h5")
+            (self._dataset.folder / "processed" / "electrophysiology" / "metadata.h5")
             if save_path is None
             else save_path)
 
@@ -257,7 +341,7 @@ class EphyDataset:
         """
         # Use processed/electrophysiology as the default path for all .npy files
         if path is None:
-            path = self._dataset.folder / "processed" / "electrophysiology"
+            path = self._dataset.folder
 
         if not isinstance(path, Path):
             path = Path(path)
@@ -321,7 +405,7 @@ class EphyDataset:
         """
         """
         saving_folder = (
-            self._dataset.folder / "processed" / "electrophysiology"
+            self._dataset.folder
             if save_path is None else save_path)
 
         self.sweep_x, self.sweep_y, self.sweep_cmd, \
@@ -344,7 +428,9 @@ class EphyDataset:
             }
 
             for key, value in data_to_save.items():
-                fl.save(saving_folder / f"{key}.h5", value)
+                filename = self._files_mapping[key]
+                fl.save(saving_folder / filename, value)
+                print(f"Saved {key} to {saving_folder / filename}")
 
     def _collect_passive_properties(
             self,
@@ -583,7 +669,4 @@ class RoiEphy:
 
         # Unpack data
         for key, value in self.data.items():
-            setattr(self, key, value)
-
-        for key, value in self.epochs.items():
             setattr(self, key, value)

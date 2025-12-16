@@ -12,6 +12,8 @@ dependencies:
   - tqdm=4.66.2
   - flammkuchen=1.0.3
   - tensorflow=2.8.0  # CPU version by default from conda-forge
+  - pytorch::pytorch::*=*=cpu*  # CPU-only PyTorch
+  - pytorch::torchvision
   - h5py=3.10.0
   - pandas=1.5.3
   - scikit-learn=1.4.0

@@ -16,9 +16,6 @@ from spyne.core.spines.analysis.timeseries.event_detection import (
     detect_calcium_events, binarize_calcium_event_probabilities)
 from spyne.core.spines.analysis.timeseries.timeseries import (
     dFF, get_timestamps, z_score)
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from spyne.core.imaging.imagingdataset import ImagingDataset
 
 
 class SpineDataset:
@@ -136,7 +133,7 @@ class SpineDataset:
         self.dendrite_threshold = dendrite_threshold
         self.min_dendrite_size = min_dendrite_size
         self.dendrite_dilation_iterations = dendrite_dilation_iterations
-        
+
         self.classifier_model_fn = classifier_model_fn
 
         self._load_data()
@@ -152,21 +149,23 @@ class SpineDataset:
             Dictionary mapping attribute names to corresponding .h5 filenames.
         """
         return {
-            'spines_data': 'spines_data.h5',
-            'spine_predictions': 'spine_predictions.h5',
-            'dendrite_predictions': 'dendrite_predictions.h5',
-            'zscores_CA3': 'zscores_CA3.h5',
-            'dFF_CA3': 'dFF_CA3.h5',
-            'ts_CA3': 'ts_CA3.h5',
-            'zscores_BLA': 'zscores_BLA.h5',
-            'dFF_BLA': 'dFF_BLA.h5',
-            'ts_BLA': 'ts_BLA.h5',
-            'calcium_events_BLA': 'calcium_events_BLA.h5',
-            'calcium_events_CA3': 'calcium_events_CA3.h5',
+            'spines_data': 'processed/spines/spines_data.h5',
+            'spine_predictions': 'processed/spines/spine_predictions.h5',
+            'dendrite_predictions': 'processed/spines/dendrite_predictions.h5',
+            'zscores_CA3': 'processed/imaging/zscores_CA3.h5',
+            'dFF_CA3': 'processed/imaging/dFF_CA3.h5',
+            'ts_CA3': 'processed/imaging/ts_CA3.h5',
+            'zscores_BLA': 'processed/imaging/zscores_BLA.h5',
+            'dFF_BLA': 'processed/imaging/dFF_BLA.h5',
+            'ts_BLA': 'processed/imaging/ts_BLA.h5',
+            'calcium_events_probabilities_BLA':
+                'analysis/spines/calcium_events_probabilities_BLA.h5',
+            'calcium_events_probabilities_CA3':
+                'analysis/spines/calcium_events_probabilities_CA3.h5',
             'calcium_events_binary_BLA':
-                'calcium_events_binary_BLA.h5',
+                'analysis/spines/calcium_events_binary_BLA.h5',
             'calcium_events_binary_CA3':
-                'calcium_events_binary_CA3.h5',
+                'analysis/spines/calcium_events_binary_CA3.h5',
         }
 
     def _load_file(
@@ -341,7 +340,7 @@ class SpineDataset:
         """
         # Use processed/spines as the default path for all .h5 files
         if path is None:
-            path = self._dataset.folder / "processed" / "spines"
+            path = self._dataset.folder
 
         if not isinstance(path, Path):
             path = Path(path)
@@ -498,11 +497,11 @@ class SpineDataset:
             self.dendrite_predictions
         ) = semantic_segmentation_pipeline(
             dataset=self._dataset,
-            segmenter=self,
+            spine_dataset=self,
             config=self.segmentation_params
         )
 
-        # Store segmenters as instance attribute for later use
+        # Store spine_datasets as instance attribute for later use
         self._spine_datasets = spine_datasets
 
         self.n_spines = len(self.spines_data)
@@ -788,10 +787,10 @@ class SpineDataset:
         selected_ts_BLA = self._fetch_spine_data(
             self.ts_BLA, spine_indices)
         selected_calcium_events_BLA = [
-            prob for n, spine in enumerate(self.calcium_events_BLA)
+            prob for n, spine in enumerate(self.calcium_events_probabilities_BLA)
             for prob in spine if n in spine_indices]
         selected_calcium_events_CA3 = [
-            prob for n, spine in enumerate(self.calcium_events_CA3)
+            prob for n, spine in enumerate(self.calcium_events_probabilities_CA3)
             for prob in spine if n in spine_indices]
         selected_calcium_events_binary_BLA = [
             prob for n, spine in enumerate(self.calcium_events_binary_BLA)
@@ -1158,32 +1157,27 @@ class RoiSpine:
             The generated base image.
         """
 
-        with tf.device(self.device):
+        # Combine all the frames across sweeps
+        combined_frames = np.concatenate(
+            [self.roi[n_sweep].sweep[:, 1, :, :].astype(np.float32)
+             for n_sweep in range(self.roi_metadata['n_sweeps'])],
+            axis=0)
 
-            # Combine all the frames across sweeps
-            combined_frames = tf.concat(
-                [tf.convert_to_tensor(
-                    self.roi[n_sweep].sweep[:, 1, :, :],
-                    dtype=tf.float32)
-                 for n_sweep in range(self.roi_metadata['n_sweeps'])],
-                axis=0)
+        # Subtract the minimum value in each frame
+        # TODO: if data are converted to uint 16 previously,
+        # the conversion is not required here
+        min_values = np.min(
+            combined_frames, axis=(1, 2), keepdims=True)
+        combined_frames -= min_values
 
-            # Subtract the minimum value in each frame
-            # TODO: if data are converted to uint 16 previously,
-            # the conversion is not required here
-            min_values = tf.reduce_min(
-                combined_frames, axis=(1, 2), keepdims=True)
-            combined_frames -= min_values
+        # Convert to uint16
+        combined_frames_uint16 = combined_frames.astype(np.uint16)
 
-            # Convert to uint16
-            combined_frames_uint16 = tf.cast(
-                combined_frames, tf.uint16)
+        # Generate the max projection image
+        base_image = np.max(
+            combined_frames_uint16, axis=0)
 
-            # Generate the max projection image
-            base_image = tf.reduce_max(
-                combined_frames_uint16, axis=0)
-
-        return base_image.numpy()
+        return base_image
 
     @cache
     def _get_spine(self, spine_index: int) -> Spine:

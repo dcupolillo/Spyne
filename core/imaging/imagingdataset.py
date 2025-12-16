@@ -533,9 +533,9 @@ class Roi:
         pixel_resolution_xy = self.roi_metadata['pixel_resolution_xy']
 
         # Crop out the corresponding roi
-        self.roi = [data[
+        self.roi = np.array([data[
             :, :, roi_bounds[0]:roi_bounds[1], :int(pixel_resolution_xy[0])]
-            for data in sweeps_data]
+            for data in sweeps_data])
 
         # Set roi metadata as attributes
         for key, value in self.roi_metadata.items():

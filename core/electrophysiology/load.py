@@ -147,7 +147,7 @@ def load_data_from_abf(ephy_instance: EphyDataset):
                 elif adc_dict[channel] == 'scanner':
                     sweep_scanner[file_n, sweep_n, :] = abf.sweepY
 
-                elif adc_dict[channel] == 'stim':
+                elif adc_dict[channel] == 'electrode':
                     sweep_stim[file_n, sweep_n, :] = abf.sweepY
 
                 elif adc_dict[channel] == 'led':
@@ -203,6 +203,7 @@ def get_digital_output_list(abf_path):
         adc_list.extend(sweep_adcs)
 
     return adc_list
+
 
 def find_test_pulse_window(
         abf_path: str or Path,

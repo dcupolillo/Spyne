@@ -419,7 +419,7 @@ def scatter_events(
 
 
 def masks(
-        roi_segmenter,
+        roi_spine,
         spines_cmap: str = 'gist_rainbow',
         spine_mask_alpha: float = 0.5,
         enum: bool = True,
@@ -438,8 +438,8 @@ def masks(
 
     Parameters
     ----------
-    roi_segmenter : RoiSegmenter
-        The ROI segmenter instance containing spine masks and base image.
+    roi_spine : RoiSpine
+        The ROI spine instance containing spine masks and base image.
         Must have attributes: spines (iterable with mask and centroid_pix),
         base_image (2D array), and n_spines (int).
     spines_cmap : str, optional
@@ -481,6 +481,8 @@ def masks(
     plt.Axes
         The matplotlib axes with the plotted spine masks.
     """
+    if not roi_spine.spines_data:
+        raise ValueError("roi_spine has no spine data to plot.")
 
     imshow_default_kwargs = {
         "cmap": "binary_r",
@@ -512,21 +514,21 @@ def masks(
     ax.set_aspect('equal')
 
     # Display base image
-    ax.imshow(roi_segmenter.base_image, **imshow_kwargs)
+    ax.imshow(roi_spine.base_image, **imshow_kwargs)
 
     # Get colormap for spines
-    cmap = plt.get_cmap(spines_cmap, roi_segmenter.n_spines)
+    cmap = plt.get_cmap(spines_cmap, roi_spine.n_spines)
 
     # Store axis limits for text positioning
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
 
     # Overlay each spine mask
-    for i, spine in enumerate(roi_segmenter):
+    for i, spine in enumerate(roi_spine.spines_data):
         color = cmap(i)
 
         # Normalize the mask to ensure binary values (0 or 1)
-        mask_normalized = spine.mask.astype(bool)
+        mask_normalized = spine["mask"].astype(bool)
 
         # Create RGBA color with transparency
         shade_color = (
@@ -546,8 +548,8 @@ def masks(
         if enum:
             # Plot centroid marker
             ax.scatter(
-                spine.centroid_pix[0],
-                spine.centroid_pix[1],
+                spine["centroid_pix"][0],
+                spine["centroid_pix"][1],
                 color=color,
                 **scatter_kwargs
             )
@@ -555,12 +557,12 @@ def masks(
             # Add spine number annotation
             # Clip text position to stay within plot bounds
             x = np.clip(
-                spine.centroid_pix[0],
+                spine["centroid_pix"][0],
                 xlim[0] + 5,
                 xlim[1] - 5
             )
             y = np.clip(
-                spine.centroid_pix[1],
+                spine["centroid_pix"][1],
                 ylim[1] + 5,
                 ylim[0] - 5
             )
@@ -582,7 +584,7 @@ def masks(
         )
         print(f'Saved! as {output_filename}')
 
-    return ax
+    return
 
 
 def animate_spines(
@@ -720,6 +722,7 @@ def animate_spines(
 def heatmap(
     data: np.ndarray,
     ts: np.ndarray,
+    axes: np.ndarray = None,
     binary: np.ndarray = None,
     select_binary: int = 1,
     vmin: float = 0.0,
@@ -741,6 +744,8 @@ def heatmap(
         Array of shape (n_spines, n_trials, n_timepoints), e.g., dFF or zscore.
     ts : np.ndarray
         Array of timestamps for each trial.
+    axes : np.ndarray, optional
+        Tuple of (mean_trace_ax, heatmap_ax, cbar) to plot on.
     binary : np.ndarray
         Binary array (n_spines, n_trials) indicating selected trials.
         If not provided, plots all trials. Default is None.
@@ -786,27 +791,42 @@ def heatmap(
     if binary is not None:
         spine_sweep_indices = np.argwhere(binary == select_binary)
         data = data[spine_sweep_indices[:, 0], spine_sweep_indices[:, 1], :]
-
+    
+    # Ensure data is 2D for heatmap: (n_samples, n_timepoints)
+    if data.ndim == 3:
+        # Reshape to (n_spines * n_trials, n_timepoints)
+        data = data.reshape(-1, data.shape[-1])
+    
     mean_trace = np.mean(data, axis=0)
     sem_trace = sem(data, axis=0, nan_policy='omit')
 
     # Use first trial's timestamps for x-axis
     timestamps = ts[0][0]
     tick_interval = framerate
-    tick_indices = np.arange(0, len(timestamps), tick_interval)
+    tick_indices = np.arange(0, len(timestamps), tick_interval).astype(int)
     tick_labels = timestamps[tick_indices].round(1)
 
-    fig = plt.figure(figsize=(5, 9))
-    gs = GridSpec(
-        2, 2,
-        width_ratios=[1, 0.05],
-        height_ratios=[0.2, 1],
-        hspace=0.05, wspace=0.05,
-        top=0.99, bottom=0.08)
-
-    mean_trace_ax = fig.add_subplot(gs[0, 0])
-    heatmap_ax = fig.add_subplot(gs[1, 0])
-    cax = fig.add_subplot(gs[1, 1])
+    if axes is None:
+        fig = plt.figure(figsize=(5, 9))
+        gs = GridSpec(
+            2, 2,
+            width_ratios=[1, 0.05],
+            height_ratios=[0.2, 1],
+            hspace=0.05, wspace=0.05,
+            top=0.99, bottom=0.08)
+    
+        mean_trace_ax = fig.add_subplot(gs[0, 0])
+        heatmap_ax = fig.add_subplot(gs[1, 0])
+        cax = fig.add_subplot(gs[1, 1])
+    
+    else:
+        if axes.shape != (2, 2):
+            raise ValueError("axes must be of shape (2, 2).")
+        
+        fig = axes[0, 0].figure
+        mean_trace_ax = axes[0, 0]
+        heatmap_ax = axes[1, 0]
+        cax = axes[1, 1]
 
     # Mean trace
     mean_trace_ax.plot(np.arange(len(mean_trace)), mean_trace, color="black")
@@ -955,8 +975,10 @@ def dendrogram(
         Additional arguments passed to the branch line plot.
     spine_kwargs : dict, optional
         Additional arguments passed to the spine lines plot.
+        If 'color' is a list/array, each spine gets a different color.
     spine_head_kwargs : dict, optional
         Additional arguments passed to the spine head scatter plot.
+        If 'color' is a list/array, each spine head gets a different color.
 
     Returns
     -------
@@ -1005,6 +1027,32 @@ def dendrogram(
     branch_kwargs = {**branch_defaults, **(branch_kwargs or {})}
     spine_kwargs = {**spine_defaults, **(spine_kwargs or {})}
     spine_head_kwargs = {**spine_head_defaults, **(spine_head_kwargs or {})}
+
+    # Check if colors are provided as lists/arrays
+    spine_colors_list = spine_kwargs.pop('color', None)
+    spine_head_colors_list = spine_head_kwargs.pop('color', None)
+    
+    # Determine if we have per-spine colors
+    use_spine_color_list = (
+        spine_colors_list is not None and 
+        isinstance(spine_colors_list, (list, np.ndarray))
+    )
+    use_spine_head_color_list = (
+        spine_head_colors_list is not None and 
+        isinstance(spine_head_colors_list, (list, np.ndarray))
+    )
+    
+    # Validate color list lengths
+    if use_spine_color_list and len(spine_colors_list) != len(spine_list):
+        raise ValueError(
+            f"spine_kwargs['color'] list length ({len(spine_colors_list)}) "
+            f"must match spine_list length ({len(spine_list)})"
+        )
+    if use_spine_head_color_list and len(spine_head_colors_list) != len(spine_list):
+        raise ValueError(
+            f"spine_head_kwargs['color'] list length ({len(spine_head_colors_list)}) "
+            f"must match spine_list length ({len(spine_list)})"
+        )
 
     # Extract xyz positions from nodes
     positions = [(node.x, node.y, node.z) for node in nodes_list]
@@ -1056,18 +1104,34 @@ def dendrogram(
 
         y_top = branch_y + this_spine_length
 
+        # Prepare spine line kwargs with per-spine color if available
+        this_spine_kwargs = spine_kwargs.copy()
+        if use_spine_color_list:
+            this_spine_kwargs['color'] = spine_colors_list[spine_n]
+        elif spine_colors_list is not None:
+            # Single color string provided
+            this_spine_kwargs['color'] = spine_colors_list
+
+        # Prepare spine head kwargs with per-spine color if available
+        this_spine_head_kwargs = spine_head_kwargs.copy()
+        if use_spine_head_color_list:
+            this_spine_head_kwargs['color'] = spine_head_colors_list[spine_n]
+        elif spine_head_colors_list is not None:
+            # Single color string provided
+            this_spine_head_kwargs['color'] = spine_head_colors_list
+
         ax.plot(
             [dendro_x, dendro_x],
             [branch_y, y_top],
             zorder=1,
             clip_on=False,
-            **spine_kwargs)
+            **this_spine_kwargs)
         ax.scatter(
             dendro_x,
             y_top,
             zorder=3,
             clip_on=False,
-            **spine_head_kwargs)
+            **this_spine_head_kwargs)
 
     ax.set(
         xlabel='Distance from origin (μm)',
