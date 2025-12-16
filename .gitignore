@@ -2,6 +2,11 @@
 inference_models/
 *.h5
 *.pth
+
+# User-specific configuration overrides
+config/spyne_config.local.yaml
+.env
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

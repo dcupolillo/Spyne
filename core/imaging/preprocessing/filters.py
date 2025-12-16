@@ -17,7 +17,7 @@ def median(
     image : np.ndarray
         The input image to be filtered.
     kernel : int
-        DESCRIPTION.
+        Kernel size (must be odd).
 
     Raises
     ------

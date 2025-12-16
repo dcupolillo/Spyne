@@ -8,6 +8,7 @@ import tensorflow as tf
 import flammkuchen as fl
 from tqdm import tqdm
 from functools import cache
+import yaml
 from spyne.core.imaging.imagingdataset import ImagingDataset
 from spyne.core.spines.analysis.segmentation.pipeline import (
     semantic_segmentation_pipeline)
@@ -41,83 +42,136 @@ class SpineDataset:
     >>> spine_dataset.calcium_events_predictions()
 
     >>> # Visualize detected spines
-    >>> spine_dataset.plot_all_spines()
-    >>> spine_dataset.plot_events_spines(input_type='BLA')
-    >>> spine_dataset.sholl(morphology=morph, radius_step=1, n_radii=10)
+    >>> spyne.plot.scatter(spine_dataset.spines_data)
     """
 
     def __init__(
         self,
         dataset: ImagingDataset,
-            segmentation_model_fn: str or Path = (
-                r"C:/Users/dcupolillo/Projects/spyne/"
-                r"inference_models/deepd3/"
-                r"model_250414_trial18.h5"),
-            spine_threshold: float = 0.3,
-            dendrite_threshold: float = 0.7,
-            mask_size: int = 3,
-            min_distance: int = 5,
-            min_spine_size: float = 4,
-            min_dendrite_size: float = 15,
-            dendrite_dilation_iterations: int = 12,
-            classifier_model_fn: str or Path = (
-                r"C:/Users/dcupolillo/Projects/spyne/"
-                r"inference_models/zscore_classifier/"
-                r"your_model_with_dff.pth"),
+        config_path: str or Path = None,
+        segmentation_model_fn: str or Path = None,
+        spine_threshold: float = None,
+        dendrite_threshold: float = None,
+        mask_size: int = None,
+        min_distance: int = None,
+        min_spine_size: float = None,
+        min_dendrite_size: float = None,
+        dendrite_dilation_iterations: int = None,
+        classifier_model_fn: str or Path = None,
     ) -> None:
         """
-        Initialize the DatasetSegmenter class.
+        Initialize the SpineDataset class.
 
         Parameters
         ----------
         dataset : ImagingDataset
             The imaging dataset to process.
-        segmentation_model_fn : str | Path, optional
-            Path to the trained model file for segmentation. Default is
-            'model_240909_2.h5'.
+        config_path : str or Path, optional
+            Path to configuration file. If None, uses default location
+            (config/spyne_config.yaml). Default is None.
+        segmentation_model_fn : str or Path, optional
+            Path to the trained model file for segmentation.
+            Overrides config file value. Default is None.
         spine_threshold : float, optional
-            Threshold for spine segmentation. Default is 0.3.
+            Threshold for spine segmentation.
+            Overrides config file value. Default is None.
         dendrite_threshold : float, optional
-            Threshold for dendrite segmentation. Default is 0.7.
+            Threshold for dendrite segmentation.
+            Overrides config file value. Default is None.
         mask_size : int, optional
-            Size of the morphological mask. Default is 3.
+            Size of the morphological mask.
+            Overrides config file value. Default is None.
         min_distance : int, optional
-            Minimum distance for spine separation. Default is 5.
+            Minimum distance for spine separation.
+            Overrides config file value. Default is None.
         min_spine_size : float, optional
-            Minimum size for spines. Default is 4.
+            Minimum size for spines.
+            Overrides config file value. Default is None.
         min_dendrite_size : float, optional
-            Minimum size for dendrites. Default is 15.
+            Minimum size for dendrites.
+            Overrides config file value. Default is None.
         dendrite_dilation_iterations : int, optional
             Number of dilation iterations for dendrite segmentation.
-            Default is 12.
+            Overrides config file value. Default is None.
         classifier_model_fn : str or Path, optional
             Path to the trained model file for calcium event classification.
-            Default is "zscore_best_model.pth"
-        classifier_cutoff : int, optional
-            Percentile value to determine calcium event
-            probability decision boundary.
-            Default is 99.
+            Overrides config file value. Default is None.
 
         Raises
         ------
         TypeError
             If the `dataset` is not an instance of `ImagingDataset`.
         FileNotFoundError
-            If the `segmentation_model_fn` file does not exist.
+            If the config file or model files do not exist.
 
-        Returns
-        -------
-        None
+        Notes
+        -----
+        Configuration priority (highest to lowest):
+        1. Arguments passed to __init__
+        2. Values from config_path YAML file
+        3. Default values in config/spyne_config.yaml
         """
 
         if not isinstance(dataset, ImagingDataset):
             raise TypeError('Invalid input type for dataset')
 
-        if not Path(segmentation_model_fn).exists():
-            raise FileNotFoundError(f'{segmentation_model_fn} does not exist')
+        # Load configuration from file
+        config = self.load_config(config_path)
+        repo_root = Path(__file__).parent.parent.parent
 
-        if not Path(classifier_model_fn).exists():
-            raise FileNotFoundError(f'{classifier_model_fn} does not exist')
+        # Model paths with overrides (argument > config > None)
+        seg_model_path = (
+            segmentation_model_fn or 
+            config['models']['segmentation']['path']
+        )
+        clf_model_path = (
+            classifier_model_fn or 
+            config['models']['classifier']['path']
+        )
+
+        # Convert to absolute paths
+        self.segmentation_model_fn = repo_root / seg_model_path
+        self.classifier_model_fn = repo_root / clf_model_path
+
+        # Validate model files exist
+        if not self.segmentation_model_fn.exists():
+            raise FileNotFoundError(
+                f'Segmentation model not found: {self.segmentation_model_fn}')
+
+        if not self.classifier_model_fn.exists():
+            raise FileNotFoundError(
+                f'Classifier model not found: {self.classifier_model_fn}')
+
+        # Load segmentation parameters from config with argument overrides
+        seg_params = config.get('segmentation', {})
+        self.spine_threshold = (
+            spine_threshold if spine_threshold is not None 
+            else seg_params.get('spine_threshold', 0.3)
+        )
+        self.dendrite_threshold = (
+            dendrite_threshold if dendrite_threshold is not None 
+            else seg_params.get('dendrite_threshold', 0.7)
+        )
+        self.mask_size = (
+            mask_size if mask_size is not None 
+            else seg_params.get('mask_size', 3)
+        )
+        self.min_distance = (
+            min_distance if min_distance is not None 
+            else seg_params.get('min_distance', 5)
+        )
+        self.min_spine_size = (
+            min_spine_size if min_spine_size is not None 
+            else seg_params.get('min_spine_size', 4)
+        )
+        self.min_dendrite_size = (
+            min_dendrite_size if min_dendrite_size is not None 
+            else seg_params.get('min_dendrite_size', 15)
+        )
+        self.dendrite_dilation_iterations = (
+            dendrite_dilation_iterations if dendrite_dilation_iterations is not None 
+            else seg_params.get('dendrite_dilation_iterations', 12)
+        )
 
         self._dataset = dataset
         self.metadata = self._dataset.metadata
@@ -125,18 +179,53 @@ class SpineDataset:
         # Device for tensorflow-based semantic segmentation
         self.device = (
             '/GPU:0' if tf.config.list_physical_devices('GPU') else '/CPU:0')
-        self.segmentation_model_fn = segmentation_model_fn
-        self.spine_threshold = spine_threshold
-        self.min_spine_size = min_spine_size
-        self.mask_size = mask_size
-        self.min_distance = min_distance
-        self.dendrite_threshold = dendrite_threshold
-        self.min_dendrite_size = min_dendrite_size
-        self.dendrite_dilation_iterations = dendrite_dilation_iterations
-
-        self.classifier_model_fn = classifier_model_fn
 
         self._load_data()
+
+    @staticmethod
+    def load_config(config_path: str or Path = None) -> dict:
+        """
+        Load configuration from YAML file.
+
+        Parameters
+        ----------
+        config_path : str or Path, optional
+            Path to configuration file. If None, uses default location
+            (config/spyne_config.yaml in repo root). Default is None.
+
+        Returns
+        -------
+        dict
+            Configuration dictionary loaded from YAML file.
+
+        Raises
+        ------
+        FileNotFoundError
+            If the specified config file does not exist.
+        yaml.YAMLError
+            If the YAML file is malformed.
+        """
+        if config_path is None:
+            # Use default config location relative to this file
+            config_path = (
+                Path(__file__).parent.parent.parent / 
+                "config/spyne_config.yaml"
+            )
+
+        config_path = Path(config_path)
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Configuration file not found: {config_path}\n"
+                f"Create a config file or ensure it exists at the expected location."
+            )
+
+        try:
+            with open(config_path, 'r') as f:
+                return yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            raise yaml.YAMLError(
+                f"Error parsing configuration file {config_path}: {e}"
+            )
 
     @property
     def _files_mapping(self) -> dict:
