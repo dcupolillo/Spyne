@@ -132,7 +132,6 @@ cython_debug/
 optimization_models/
 presentations/
 models/
-analysis/
 neuralnetwork/spine_segmentation/bayesian_search
 neuralnetwork/IoU
 data/
