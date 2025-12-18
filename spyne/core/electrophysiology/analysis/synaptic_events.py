@@ -2,8 +2,6 @@ import pyabf
 import numpy as np
 import tensorflow as tf
 import miniML
-from miniML.core.miniML_plot_functions import miniML_plots
-
 
 def init_containers(
         n_sweeps: int,

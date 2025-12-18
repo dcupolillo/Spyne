@@ -48,6 +48,7 @@ dependencies = [
     "deepd3 @ git+https://github.com/dcupolillo/deepd3.git",
     "ROIpy @ git+https://github.com/dcupolillo/ROIpy.git",
     "calcium_event_classifier @ git+https://github.com/dcupolillo/calcium_event_classifier.git",
+    "miniML @ git+https://github.com/dcupolillo/miniML.git",
 ]
 
 [project.urls]
