@@ -1,10 +1,9 @@
-from spyne.core.spines.analysis.segmentation.detection import inference
-from spyne.core.spines.analysis.segmentation.post_processing import (
-    process_predictions)
-from spyne.core.spines.analysis.segmentation.padding import pad_images
+from deepd3.inference.post_processing import process_predictions
 from spyne.core.spines.analysis.spatial_distances import (
     euclidean_distance, find_closest_node, distance_along_neurite, find_root,
     prepare_neurite_distance_tools)
+from deepd3.inference.utils import pad_images
+from deepd3.inference.detection import inference as deepd3_inference
 import numpy as np
 from tqdm import tqdm
 import tensorflow as tf
@@ -60,7 +59,7 @@ def run_inference_and_post_processing(
     with tqdm(total=2, desc="Inference Progress", leave=True) as pbar:
 
         # Step 1: Perform inference
-        raw_predictions = inference(
+        raw_predictions = deepd3_inference(
             images=images,
             model_fn=config['segmentation_model_fn'],
             original_dimensions=original_dimensions,

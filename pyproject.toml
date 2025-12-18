@@ -45,6 +45,7 @@ dependencies = [
     "pandas>=1.3.0",
     "plotly>=5.0.0",
     "pyyaml>=5.4.0",
+    "deepd3 @ git+https://github.com/dcupolillo/deepd3.git",
     "ROIpy @ git+https://github.com/dcupolillo/ROIpy.git",
     "calcium_event_classifier @ git+https://github.com/dcupolillo/calcium_event_classifier.git",
 ]
