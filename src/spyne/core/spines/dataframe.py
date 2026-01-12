@@ -14,7 +14,9 @@ if TYPE_CHECKING:
 
 def to_dataframe(
     spine_dataset: SpineDataset,
-    n_events_threshold: int = 1
+    calcium_events_binary_BLA: np.ndarray,
+    calcium_events_binary_CA3: np.ndarray,
+    n_events_threshold: int = 1,
 ) -> pd.DataFrame:
     """
     Convert spine data from a SpineDataset into a pandas DataFrame.
@@ -22,6 +24,13 @@ def to_dataframe(
     ----------
     spine_dataset : SpineDataset
         The SpineDataset instance containing spine data and predictions.
+    calcium_events_binary_BLA : np.ndarray
+        Binary array indicating predicted calcium events for BLA spines.
+    calcium_events_binary_CA3 : np.ndarray
+        Binary array indicating predicted calcium events for CA3 spines.
+    n_events_threshold : int, optional
+        Minimum number of events to consider a spine as active (default is 1).
+
     Returns
     -------
     pd.DataFrame
@@ -36,8 +45,8 @@ def to_dataframe(
     df = spines_to_dataframe(
         data_list,
         neuron_id,
-        spine_dataset.calcium_events_binary_BLA,
-        spine_dataset.calcium_events_binary_CA3,
+        calcium_events_binary_BLA,
+        calcium_events_binary_CA3,
         n_events_threshold,
         nodes_list
     )

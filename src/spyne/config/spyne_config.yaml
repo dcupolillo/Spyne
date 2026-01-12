@@ -3,10 +3,10 @@
 
 models:
   segmentation:
-    path: inference_models/deepd3/model_250414_trial18.h5
+    path: ../../inference_models/deepd3/model_250414_trial18.h5
     description: DeepD3 segmentation model for spine and dendrite detection
   classifier:
-    path: inference_models/calcium_event_classifier/your_model_with_dff.pth
+    path: ../../inference_models/calcium_event_classifier/251118_model_dff.pth
     description: Calcium event classifier for detecting activity events
 
 segmentation:

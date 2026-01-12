@@ -13,8 +13,7 @@ from spyne.core.imaging.imagingdataset import ImagingDataset
 from spyne.core.spines.analysis.segmentation.pipeline import (
     semantic_segmentation_pipeline)
 from spyne.core.spines.analysis.timeseries.pipeline import collect_timeseries
-from spyne.core.spines.analysis.timeseries.event_detection import (
-    detect_calcium_events, binarize_calcium_event_probabilities)
+from spyne.core.spines.analysis.timeseries.event_detection import detect_calcium_events
 from spyne.core.spines.analysis.timeseries.timeseries import (
     dFF, get_timestamps, z_score)
 
@@ -263,10 +262,6 @@ class SpineDataset:
                 'analysis/spines/calcium_events_probabilities_BLA.h5',
             'calcium_events_probabilities_CA3':
                 'analysis/spines/calcium_events_probabilities_CA3.h5',
-            'calcium_events_binary_BLA':
-                'analysis/spines/calcium_events_binary_BLA.h5',
-            'calcium_events_binary_CA3':
-                'analysis/spines/calcium_events_binary_CA3.h5',
         }
 
     def _load_file(
@@ -434,10 +429,6 @@ class SpineDataset:
             Calcium event probability for BLA spines.
         calcium_events_CA3 : list
             Calcium event probability for CA3 spines.
-        calcium_events_binary_BLA : list
-            Binarized calcium events for BLA spines.
-        calcium_events_binary_CA3 : list
-            Binarized calcium events for CA3 spines.
         """
         # Use processed/spines as the default path for all .h5 files
         if path is None:
@@ -471,14 +462,6 @@ class SpineDataset:
 
         # Update spine counts
         self.n_spines = len(getattr(self, 'spines_data', []))
-
-        self.n_spines_BLA = sum(
-            1 for spine in getattr(self, 'calcium_events_binary_BLA', [])
-            if sum(spine) > 0)
-
-        self.n_spines_CA3 = sum(
-            1 for spine in getattr(self, 'calcium_events_binary_CA3', [])
-            if sum(spine) > 0)
 
     def collect_all_data(
             self,
@@ -710,10 +693,9 @@ class SpineDataset:
         Detect calcium events in spines using a trained neural network
         classifier.
 
-        This method processes the z-scored traces for BLA and CA3 spines to
+        This method processes traces for BLA and CA3 spines to
         detect calcium events using a pre-trained neural network classifier.
-        The results are stored as probabilities and binarized using the
-        configured threshold parameters.
+        The results are stored as probabilities values.
 
         Parameters
         ----------
@@ -730,31 +712,20 @@ class SpineDataset:
             Raw calcium event probabilities for BLA spines.
         calcium_event_probabilities_CA3 : list
             Raw calcium event probabilities for CA3 spines.
-        calcium_event_binary_BLA : np.ndarray
-            Binarized calcium events for BLA spines.
-        calcium_event_binary_CA3 : np.ndarray
-            Binarized calcium events for CA3 spines.
-        n_spines_BLA : int
-            Number of active BLA spines (with at least one calcium event).
-        n_spines_CA3 : int
-            Number of active CA3 spines (with at least one calcium event).
 
         Notes
         -----
         - This method requires that timeseries data has been collected first
               (i.e., `_collect_timeseries()` should be run before this method).
-        - The method uses the zscore_classifier to predict calcium events
-              from z-scored traces.
-        - Binarization is performed using the
-            `binarize_calcium_event_probabilities`
-            function with parameters from the configuration.
+        - The method uses the calcium event classifier to predict calcium events
+              from dF/F0 traces.
         - This method is typically called automatically
             by `collect_all_data()`.
 
         Raises
         ------
         ValueError
-            If z-scored data is not available (run `collect_all_data()` first).
+            If time series data is not available (run `collect_all_data()` first).
         """
         # if not hasattr(self, 'zscores_BLA') or not self.zscores_BLA:
         #     raise ValueError(
@@ -779,21 +750,6 @@ class SpineDataset:
             zscores=self.zscores_CA3,
             dFF=self.dFF_CA3)
 
-        self.calcium_events_binary_BLA = binarize_calcium_event_probabilities(
-            self.calcium_event_probabilities_BLA)
-
-        self.calcium_events_binary_CA3 = binarize_calcium_event_probabilities(
-            self.calcium_event_probabilities_CA3)
-
-        # Update spine counts
-        self.n_spines_BLA = sum(
-            1 for spine in self.calcium_events_binary_BLA
-            if sum(spine) > 0)
-
-        self.n_spines_CA3 = sum(
-            1 for spine in self.calcium_events_binary_CA3
-            if sum(spine) > 0)
-
         if save:
 
             calcium_events_to_save = {
@@ -801,10 +757,6 @@ class SpineDataset:
                     getattr(self, 'calcium_event_probabilities_BLA', []),
                 "calcium_event_probabilities_CA3.h5":
                     getattr(self, 'calcium_event_probabilities_CA3', []),
-                "calcium_events_binary_BLA.h5":
-                    getattr(self, 'calcium_events_binary_BLA', []),
-                "calcium_events_binary_CA3.h5":
-                    getattr(self, 'calcium_events_binary_CA3', [])
             }
 
             for filename, data in calcium_events_to_save.items():
@@ -893,12 +845,6 @@ class SpineDataset:
         selected_calcium_events_CA3 = [
             prob for n, spine in enumerate(self.calcium_events_probabilities_CA3)
             for prob in spine if n in spine_indices]
-        selected_calcium_events_binary_BLA = [
-            prob for n, spine in enumerate(self.calcium_events_binary_BLA)
-            for prob in spine if n in spine_indices]
-        selected_calcium_events_binary_CA3 = [
-            prob for n, spine in enumerate(self.calcium_events_binary_CA3)
-            for prob in spine if n in spine_indices]
 
         selected_spines_data = [
             self.spines_data[i] for i in spine_indices]
@@ -929,8 +875,6 @@ class SpineDataset:
                 selected_spines_data,
                 selected_calcium_events_BLA,
                 selected_calcium_events_CA3,
-                selected_calcium_events_binary_BLA,
-                selected_calcium_events_binary_CA3,
                 spine_predictions,
                 dendrite_predictions)
 
@@ -1012,41 +956,6 @@ class SpineDataset:
             spine for spine in self.spines_data
             if spine['branch_degree'] == branch_degree]
 
-    def spines_by_calcium(
-            self,
-            input_type: str = "BLA",
-            n_event_threshold: int = 1,
-    ) -> list:
-        """
-        Retrieve spines with a minimum number of calcium events.
-
-        Parameters
-        ----------
-        input_type : str, optional
-            The data type to use for event analysis ('BLA' or 'CA3').
-            Default is 'BLA'.
-        n_event_threshold : int, optional
-            Minimum number of events required for a spine to be
-            considered active. Default is 1.
-
-        Returns
-        -------
-        list
-            List of spines with the specified number of calcium events.
-            Sublist of self.spines_data.
-        """
-
-        if input_type == 'BLA':
-            events = self.calcium_events_binary_BLA
-        elif input_type == 'CA3':
-            events = self.calcium_events_binary_CA3
-        else:
-            raise ValueError("Incorrect input type")
-
-        return [
-            spine for spine, event in zip(self.spines_data, events)
-            if sum(event) >= n_event_threshold]
-
     def _fetch_spine_data(
             self,
             data_batch: list or np.ndarray,
@@ -1118,8 +1027,6 @@ class RoiSpine:
             spines_data: list,
             calcium_events_BLA: list,
             calcium_events_CA3: list,
-            calcium_events_binary_BLA: list,
-            calcium_events_binary_CA3: list,
             spine_predictions: np.ndarray,
             dendrite_predictions: np.ndarray
     ) -> None:
@@ -1156,10 +1063,10 @@ class RoiSpine:
             Calcium event probabilities for spines in the BLA region.
         calcium_events_CA3 : list
             Calcium event probabilities for spines in the CA3 region.
-        calcium_events_binary_BLA : list
-            Binarized calcium event probabilities for BLA spines.
-        calcium_events_binary_CA3 : list
-            Binarized calcium event probabilities for CA3 spines.
+        spine_predictions : np.ndarray
+            Raw neural network predictions for spine segmentation.
+        dendrite_predictions : np.ndarray
+            Raw neural network predictions for dendrite segmentation.
 
         Attributes
         ----------
@@ -1210,8 +1117,6 @@ class RoiSpine:
 
         self.calcium_events_BLA = calcium_events_BLA
         self.calcium_events_CA3 = calcium_events_CA3
-        self.calcium_events_binary_BLA = calcium_events_binary_BLA
-        self.calcium_events_binary_CA3 = calcium_events_binary_CA3
 
         self.spine_predictions = spine_predictions
         self.dendrite_predictions = dendrite_predictions

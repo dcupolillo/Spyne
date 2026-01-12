@@ -77,7 +77,6 @@ def collect_timeseries(
     dFF_BLA.fill(np.nan)
     ts_BLA.fill(np.nan)
 
-
     with tqdm(total=total_spines, desc="Collecting timeseries") as pbar:
         for global_spine_index, spine_data in enumerate(spines_data):
             roi_n = spine_data['roi_n']
@@ -148,8 +147,14 @@ def collect_timeseries(
     assert zscores_CA3.shape == dFF_CA3.shape == ts_CA3.shape, "Inconsistent shapes for CA3 timeseries data"
     assert zscores_BLA.shape == dFF_BLA.shape == ts_BLA.shape, "Inconsistent shapes for BLA timeseries data"
 
-    arrays = {i: array for i, array in enumerate(
-        ['zscores_CA3', 'dFF_CA3', 'ts_CA3', 'zscores_BLA', 'dFF_BLA', 'ts_BLA'])}
+    arrays = {
+        'zscores_CA3': zscores_CA3,
+        'dFF_CA3': dFF_CA3,
+        'ts_CA3': ts_CA3,
+        'zscores_BLA': zscores_BLA,
+        'dFF_BLA': dFF_BLA,
+        'ts_BLA': ts_BLA,
+    }
     
     for name, array in arrays.items():
         if array.shape[0] != total_spines:
