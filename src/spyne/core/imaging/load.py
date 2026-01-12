@@ -150,6 +150,10 @@ def load_metadata_from_tiff(
     for file_n, file_path in enumerate(
             tqdm(unique_roifile_list, desc="Loading metadata")):
 
+        # Extract z-value from file path to get correct z-index
+        z_value = int(file_path.parent.name[1:])
+        z_index = z_index_map[z_value]
+
         abf_file = dataset_instance.abf_file_list[file_n]
         adc_list = get_digital_output_list(abf_file)
 

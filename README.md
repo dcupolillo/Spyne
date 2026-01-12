@@ -11,34 +11,48 @@
 
 ## Installation
 
-### Note to GPU users
+Choose the installation method based on your hardware setup:
 
-To use the GPU environment, you must have an NVIDIA GPU and the appropriate CUDA drivers installed. See the [NVIDIA CUDA Installation Guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) for instructions. Make sure your CUDA version is compatible with the versions of deep learning libraries specified in `environment.yml`.
-
-### How to install:
-
-To install `spyne`, clone the repository and create a conda environment using the appropriate YAML file for your hardware:
+### For GPU Users (NVIDIA CUDA)
 
 ```bash
+# Clone and set up conda environment with GPU-enabled PyTorch/TensorFlow
 git clone https://github.com/dcupolillo/spyne.git
 cd spyne
-
-# For CPU-only users:
-conda env create -f environment_CPU.yml
-
-# For GPU users (NVIDIA CUDA installed):
 conda env create -f environment.yml
+conda activate spyne-env
 
-# Activate env
-conda activate spyne-env  # or spyne-env-cpu for CPU-only
+# Install spyne
+pip install -e .
 ```
 
-**CPU vs GPU environments:**
+**Prerequisites:** You must have an NVIDIA GPU and appropriate CUDA drivers installed. See the [NVIDIA CUDA Installation Guide](https://docs.nvidia.com/cuda/cuda-installation-guide-linux/index.html) for setup instructions. Ensure your CUDA version is compatible with the deep learning library versions specified in `environment.yml`.
 
-- `environment_CPU.yml` is for users without a dedicated GPU. It installs CPU-compatible versions of all dependencies.
-- `environment.yml` is for users with an NVIDIA GPU and CUDA drivers. It installs GPU-accelerated packages (e.g., tensorflow-gpu).
+### For CPU-Only Users
 
-If you only want to use plotting and data loading features (not deep learning/segmentation), the CPU environment is sufficient. To perform analysis such as spine segmentation and calcium event classification, GPU is required.
+```bash
+# Clone and set up conda environment with CPU-only PyTorch/TensorFlow
+git clone https://github.com/dcupolillo/spyne.git
+cd spyne
+conda env create -f environment_CPU.yml
+conda activate spyne-env-cpu
+
+# Install spyne
+pip install -e .
+```
+
+### Minimal Install (Data Processing Only)
+
+If you only need plotting and data loading features (not spine segmentation or event classification):
+
+```bash
+pip install git+https://github.com/dcupolillo/spyne.git
+```
+
+### Feature Requirements
+
+- **Plotting and data loading only:** Minimal install is sufficient (CPU environment).
+- **Spine segmentation and calcium event classification:** GPU environment strongly recommended for reasonable performance.
 
 ---
 

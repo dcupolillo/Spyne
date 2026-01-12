@@ -36,8 +36,8 @@ def to_dataframe(
     df = spines_to_dataframe(
         data_list,
         neuron_id,
-    spine_dataset.calcium_events_binary_BLA,
-    spine_dataset.calcium_events_binary_CA3,
+        spine_dataset.calcium_events_binary_BLA,
+        spine_dataset.calcium_events_binary_CA3,
         n_events_threshold,
         nodes_list
     )

@@ -32,6 +32,7 @@ classifiers = [
 # (environment.yml for GPU, environment_CPU.yml for CPU)
 dependencies = [
     "numpy==1.23.5",
+    "protobuf==3.20.3",
     "scipy==1.10.1",
     "matplotlib==3.8.2",
     "scikit-image==0.22.0",
@@ -45,6 +46,7 @@ dependencies = [
     "pandas>=1.3.0",
     "plotly>=5.0.0",
     "pyyaml>=5.4.0",
+    "ipfx>=0.9.0",
     "deepd3 @ git+https://github.com/dcupolillo/deepd3.git",
     "ROIpy @ git+https://github.com/dcupolillo/ROIpy.git",
     "calcium_event_classifier @ git+https://github.com/dcupolillo/calcium_event_classifier.git",
@@ -58,4 +60,11 @@ Issues = "https://github.com/dcupolillo/spyne/issues"
 Documentation = "https://github.com/dcupolillo/spyne/#readme"
 
 [tool.setuptools]
-packages = ["spyne"]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["spyne*"]
+
+[tool.setuptools.package-data]
+ROIpy = ["py.typed"]

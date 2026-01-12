@@ -144,34 +144,17 @@ class SpineDataset:
 
         # Load segmentation parameters from config with argument overrides
         seg_params = config.get('segmentation', {})
-        self.spine_threshold = (
-            spine_threshold if spine_threshold is not None 
-            else seg_params.get('spine_threshold', 0.3)
-        )
-        self.dendrite_threshold = (
-            dendrite_threshold if dendrite_threshold is not None 
-            else seg_params.get('dendrite_threshold', 0.7)
-        )
-        self.mask_size = (
-            mask_size if mask_size is not None 
-            else seg_params.get('mask_size', 3)
-        )
-        self.min_distance = (
-            min_distance if min_distance is not None 
-            else seg_params.get('min_distance', 5)
-        )
-        self.min_spine_size = (
-            min_spine_size if min_spine_size is not None 
-            else seg_params.get('min_spine_size', 4)
-        )
-        self.min_dendrite_size = (
-            min_dendrite_size if min_dendrite_size is not None 
-            else seg_params.get('min_dendrite_size', 15)
-        )
-        self.dendrite_dilation_iterations = (
-            dendrite_dilation_iterations if dendrite_dilation_iterations is not None 
-            else seg_params.get('dendrite_dilation_iterations', 12)
-        )
+        self._set_segmentation_params(
+            seg_params, 
+            **{
+                'spine_threshold': spine_threshold,
+                'dendrite_threshold': dendrite_threshold,
+                'mask_size': mask_size,
+                'min_distance': min_distance,
+                'min_spine_size': min_spine_size,
+                'min_dendrite_size': min_dendrite_size,
+                'dendrite_dilation_iterations': dendrite_dilation_iterations,
+            })
 
         self._dataset = dataset
         self.metadata = self._dataset.metadata
@@ -225,6 +208,35 @@ class SpineDataset:
         except yaml.YAMLError as e:
             raise yaml.YAMLError(
                 f"Error parsing configuration file {config_path}: {e}"
+            )
+
+    def _set_segmentation_params(
+        self,
+        seg_params: dict,
+        **kwargs
+    ) -> None:
+        """
+        Set segmentation parameters with priority: arguments > config.
+
+        Parameters
+        ----------
+        seg_params : dict
+            Segmentation parameters from config file.
+        **kwargs
+            Parameter overrides (spine_threshold, dendrite_threshold,
+            mask_size, min_distance, min_spine_size, min_dendrite_size,
+            dendrite_dilation_iterations). Only non-None values override config.
+
+        Notes
+        -----
+        All values must be defined in config file.
+        Arguments will override config values if provided.
+        """
+        for param_name, arg_value in kwargs.items():
+            setattr(
+                self,
+                param_name,
+                arg_value if arg_value is not None else seg_params[param_name]
             )
 
     @property
@@ -952,7 +964,6 @@ class SpineDataset:
     def spines_by_branch(
             self,
             branch_id: int,
-            direction: str = None
     ) -> list:
         """
         Retrieve spines associated with a specific branch ID.
@@ -961,9 +972,6 @@ class SpineDataset:
         ----------
         branch_id : int
             Branch ID to filter spines.
-        direction: str
-            If spines coordinates should be flattened in the 'vertical'
-            or 'horizontal' direction. Default is None.
 
         Returns
         -------
@@ -982,22 +990,7 @@ class SpineDataset:
         if not spines:
             raise ValueError("Selected branch has no detected spines.")
 
-        if not direction:
-            return spines
-
-        if direction not in ["horizontal", "vertical"]:
-            raise ValueError("Unrecognized direction."
-                             "Should be `horizontal` or `vertical`.")
-
-        translation, angle = (
-            self._dataset.morph.neuron.get_branch(branch_id).flat(
-                direction, return_params=True))
-
-        return rotate_and_transform_spines(
-            spines,
-            translation,
-            angle,
-            self._dataset.morph.objective_resolution)
+        return spines
 
     def spines_by_branch_degree(self, branch_degree: int) -> list:
         """
