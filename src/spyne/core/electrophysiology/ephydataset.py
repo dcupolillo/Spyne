@@ -52,9 +52,9 @@ class EphyDataset:
         self._dataset = dataset
         self.abf_file_list = self._dataset.abf_file_list
 
-        I_step_folder = self._dataset.folder / "raw"
+        _I_step_folder = self._dataset.folder / "raw"
         self.Istep_filename = [
-            fname for fname in I_step_folder.glob("*.abf")
+            fname for fname in _I_step_folder.glob("*.abf")
         ][0]
 
         self.model_fn = model_fn

@@ -185,6 +185,11 @@ def semantic_segmentation_pipeline(
 
         closest_node_id = find_closest_node(spine_dict, morph.neuron)
         root_node_index = find_root(morph.neuron, closest_node_id)
+
+        if root_node_index is None:
+            # Handle the case where no root is found
+            # You could skip this spine, use a default, or raise an informative error
+            raise ValueError(f"No root node found for node_id {closest_node_id}")
         
         # find_root returns an index, convert to node ID
         root_node_id = morph.neuron[root_node_index].id

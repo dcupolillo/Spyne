@@ -5,7 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import numpy as np
 from spyne.core.spines.analysis.spatial_distances import (
-    distance_along_neurite, get_path_to_root, path_distance)
+    distance_along_neurite, get_path_to_root, path_distance,
+    prepare_neurite_distance_tools)
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -306,6 +307,8 @@ def add_nearest_neighbor_distance_column(
     Uses `distance_along_neurite()` function to compute distances.
     """
 
+    node_map, paths_to_root = prepare_neurite_distance_tools(nodes_list)
+
     # Initialize the column with NaN values
     dataframe[f"nearest_neighbor_distance_{input_identity}"] = np.nan
 
@@ -337,7 +340,7 @@ def add_nearest_neighbor_distance_column(
                 if i == j:
                     continue
                 
-                d = distance_along_neurite(nodes_list, node_ids[i], node_ids[j])
+                d = distance_along_neurite(node_map, paths_to_root, node_ids[i], node_ids[j])
                 
                 if d > 0 and d < min_dist:
                     min_dist = d
@@ -430,6 +433,8 @@ def add_consecutive_neighbor_distance_column(
     Uses `distance_along_neurite()` function to compute distances.
     """
 
+    node_map, paths_to_root = prepare_neurite_distance_tools(nodes_list)
+
     # Initialize the column with NaN values
     dataframe[f"consecutive_neighbor_distance_{input_identity}"] = np.nan
 
@@ -439,7 +444,6 @@ def add_consecutive_neighbor_distance_column(
     grouped = dataframe_by_input.groupby('branch_id')
 
     for _, branch_df in grouped:
-        node_map = {node.id: node for node in nodes_list}
         branch_df = branch_df.copy()
         branch_df['distance_from_soma'] = branch_df['closest_node_id'].apply(
             lambda nid: path_distance(
@@ -467,7 +471,7 @@ def add_consecutive_neighbor_distance_column(
             min_dist = np.inf
             
             for j in range(i + 1, n): # Only spines after i in the sorted list
-                d = distance_along_neurite(nodes_list, node_ids[i], node_ids[j])
+                d = distance_along_neurite(node_map, paths_to_root, node_ids[i], node_ids[j])
                 if d > 0 and d < min_dist:
                     min_dist = d
             

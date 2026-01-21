@@ -54,14 +54,15 @@ def find_closest_node(
     # during segmentation post-processing
     branch_id = spine["branch_id"]
 
-    # Only consider nodes from the same branch
+    # Only consider nodes from the same branch, excluding soma nodes
     branch_nodes = [
         node for node in nodes_list
         if hasattr(node, "branch_id") and
-        node.branch_id == branch_id]
+        node.branch_id == branch_id and
+        getattr(node, 'type', None) != 'soma']
 
     if not branch_nodes:
-        raise ValueError(f"No nodes found for branch_id {branch_id}.")
+        raise ValueError(f"No non-soma nodes found for branch_id {branch_id}.")
 
     for node in branch_nodes:
         node_position = (node.x, node.y, node.z)
@@ -242,15 +243,20 @@ def find_root(
     if node_id > nodes_list[-1].id:
         raise IndexError("Node index out of range")
 
-    node_index = node_id - 1
+    node_index = node_id - 1 # -1 because 0-based numeration
 
     for node in nodes_list[:node_index][::-1]:
         parent_id = node.parent_id
-        if nodes_list[parent_id - 1].is_fork:
-            return parent_id - 1
+            
+        # Check if parent is a fork or soma
+        if nodes_list[parent_id - 1].is_fork: 
+            return node.id - 1  # Return current node (first node of branch segment)
 
         if nodes_list[parent_id - 1].type == "soma":
-            return parent_id - 1
+            return node.id - 1  # Return current node (first dendritic node from soma)
+    
+    # Fallback
+    return 0
 
 
 def interspine_distance(
@@ -276,12 +282,15 @@ def interspine_distance(
         The Euclidean distance between the two spines.
     """
 
+    node_map, paths_to_root = prepare_neurite_distance_tools(nodes_list)
+    
     closest_node_1 = nodes_list[spine1['closest_node_id'] - 1]
     closest_node_2 = nodes_list[spine2['closest_node_id'] - 1]
 
     # Distance along neurite between nodes
     internode_distance = distance_along_neurite(
-        nodes_list,
+        node_map,
+        paths_to_root,
         closest_node_1.id,
         closest_node_2.id
     )

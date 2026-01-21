@@ -4,16 +4,11 @@
 from __future__ import annotations
 from pathlib import Path
 import numpy as np
-import tensorflow as tf
-import flammkuchen as fl
-from tqdm import tqdm
-from functools import cache
-import yaml
+from functools import cache, cached_property
 from spyne.core.imaging.imagingdataset import ImagingDataset
-from spyne.core.spines.analysis.segmentation.pipeline import (
-    semantic_segmentation_pipeline)
-from spyne.core.spines.analysis.timeseries.pipeline import collect_timeseries
-from spyne.core.spines.analysis.timeseries.event_detection import detect_calcium_events
+from spyne.core.spines.config import SpineDatasetConfig
+from spyne.core.spines.dataloader import SpineDataLoader
+from spyne.core.spines.pipeline import SpineAnalysisPipeline
 from spyne.core.spines.analysis.timeseries.timeseries import (
     dFF, get_timestamps, z_score)
 
@@ -109,227 +104,39 @@ class SpineDataset:
         1. Arguments passed to __init__
         2. Values from config_path YAML file
         3. Default values in config/spyne_config.yaml
+
+        Order of operations:
+        1. Load configuration
+        2. Load pre-computed data
+        3. Initialize analysis pipeline
         """
 
         if not isinstance(dataset, ImagingDataset):
             raise TypeError('Invalid input type for dataset')
-
-        # Load configuration from file
-        config = self.load_config(config_path)
-        repo_root = Path(__file__).parent.parent.parent
-
-        # Model paths with overrides (argument > config > None)
-        seg_model_path = (
-            segmentation_model_fn or 
-            config['models']['segmentation']['path']
-        )
-        clf_model_path = (
-            classifier_model_fn or 
-            config['models']['classifier']['path']
-        )
-
-        # Convert to absolute paths
-        self.segmentation_model_fn = repo_root / seg_model_path
-        self.classifier_model_fn = repo_root / clf_model_path
-
-        # Validate model files exist
-        if not self.segmentation_model_fn.exists():
-            raise FileNotFoundError(
-                f'Segmentation model not found: {self.segmentation_model_fn}')
-
-        if not self.classifier_model_fn.exists():
-            raise FileNotFoundError(
-                f'Classifier model not found: {self.classifier_model_fn}')
-
-        # Load segmentation parameters from config with argument overrides
-        seg_params = config.get('segmentation', {})
-        self._set_segmentation_params(
-            seg_params, 
-            **{
-                'spine_threshold': spine_threshold,
-                'dendrite_threshold': dendrite_threshold,
-                'mask_size': mask_size,
-                'min_distance': min_distance,
-                'min_spine_size': min_spine_size,
-                'min_dendrite_size': min_dendrite_size,
-                'dendrite_dilation_iterations': dendrite_dilation_iterations,
-            })
-
+        
         self._dataset = dataset
         self.metadata = self._dataset.metadata
 
-        # Device for tensorflow-based semantic segmentation
-        self.device = (
-            '/GPU:0' if tf.config.list_physical_devices('GPU') else '/CPU:0')
+        # Initialize configuration manager
+        self.config = SpineDatasetConfig(
+            config_path=config_path,
+            segmentation_model_fn=segmentation_model_fn,
+            classifier_model_fn=classifier_model_fn,
+            spine_threshold=spine_threshold,
+            dendrite_threshold=dendrite_threshold,
+            mask_size=mask_size,
+            min_distance=min_distance,
+            min_spine_size=min_spine_size,
+            min_dendrite_size=min_dendrite_size,
+            dendrite_dilation_iterations=dendrite_dilation_iterations
+        )
 
+        # Load pre-computed data
+        self.data_loader = SpineDataLoader(self._dataset.folder)
         self._load_data()
-
-    @staticmethod
-    def load_config(config_path: str or Path = None) -> dict:
-        """
-        Load configuration from YAML file.
-
-        Parameters
-        ----------
-        config_path : str or Path, optional
-            Path to configuration file. If None, uses default location
-            (config/spyne_config.yaml in repo root). Default is None.
-
-        Returns
-        -------
-        dict
-            Configuration dictionary loaded from YAML file.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified config file does not exist.
-        yaml.YAMLError
-            If the YAML file is malformed.
-        """
-        if config_path is None:
-            # Use default config location relative to this file
-            config_path = (
-                Path(__file__).parent.parent.parent / 
-                "config/spyne_config.yaml"
-            )
-
-        config_path = Path(config_path)
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"Configuration file not found: {config_path}\n"
-                f"Create a config file or ensure it exists at the expected location."
-            )
-
-        try:
-            with open(config_path, 'r') as f:
-                return yaml.safe_load(f)
-        except yaml.YAMLError as e:
-            raise yaml.YAMLError(
-                f"Error parsing configuration file {config_path}: {e}"
-            )
-
-    def _set_segmentation_params(
-        self,
-        seg_params: dict,
-        **kwargs
-    ) -> None:
-        """
-        Set segmentation parameters with priority: arguments > config.
-
-        Parameters
-        ----------
-        seg_params : dict
-            Segmentation parameters from config file.
-        **kwargs
-            Parameter overrides (spine_threshold, dendrite_threshold,
-            mask_size, min_distance, min_spine_size, min_dendrite_size,
-            dendrite_dilation_iterations). Only non-None values override config.
-
-        Notes
-        -----
-        All values must be defined in config file.
-        Arguments will override config values if provided.
-        """
-        for param_name, arg_value in kwargs.items():
-            setattr(
-                self,
-                param_name,
-                arg_value if arg_value is not None else seg_params[param_name]
-            )
-
-    @property
-    def _files_mapping(self) -> dict:
-        """
-        Mapping of attribute names to filenames for data loading.
-
-        Returns
-        -------
-        dict
-            Dictionary mapping attribute names to corresponding .h5 filenames.
-        """
-        return {
-            'spines_data': 'processed/spines/spines_data.h5',
-            'spine_predictions': 'processed/spines/spine_predictions.h5',
-            'dendrite_predictions': 'processed/spines/dendrite_predictions.h5',
-            'zscores_CA3': 'processed/imaging/zscores_CA3.h5',
-            'dFF_CA3': 'processed/imaging/dFF_CA3.h5',
-            'ts_CA3': 'processed/imaging/ts_CA3.h5',
-            'zscores_BLA': 'processed/imaging/zscores_BLA.h5',
-            'dFF_BLA': 'processed/imaging/dFF_BLA.h5',
-            'ts_BLA': 'processed/imaging/ts_BLA.h5',
-            'calcium_events_probabilities_BLA':
-                'analysis/spines/calcium_events_probabilities_BLA.h5',
-            'calcium_events_probabilities_CA3':
-                'analysis/spines/calcium_events_probabilities_CA3.h5',
-        }
-
-    def _load_file(
-            self,
-            filepath: str or Path,
-            set_attribute: bool = True
-    ) -> tuple[str, any]:
-        """
-        Load a single .h5 file and optionally set it as an instance attribute.
-
-        This method serves as a building block for loading individual
-        data files. It can infer the attribute name from the filename
-        using the files mapping or load data from any .h5 file path.
-
-        Parameters
-        ----------
-        filepath : str or Path
-            Path to the .h5 file to load.
-        set_attribute : bool, optional
-            Whether to set the loaded data as an instance attribute.
-            Default is True.
-
-        Returns
-        -------
-        tuple[str, any]
-            Tuple containing (attribute_name, loaded_data).
-            If the filename is not in the mapping, attribute_name will be
-            the filename without extension.
-
-        Raises
-        ------
-        FileNotFoundError
-            If the specified file does not exist.
-        ValueError
-            If the file is not a .h5 file.
-        """
-        if not isinstance(filepath, Path):
-            filepath = Path(filepath)
-
-        if not filepath.exists():
-            raise FileNotFoundError(f"File {filepath} does not exist")
-
-        if not filepath.suffix == '.h5':
-            raise ValueError(f"File {filepath} must be a .h5 file")
-
-        filename = filepath.name
-        attribute_name = None
-
-        for attr, mapped_filename in self._files_mapping.items():
-            if filename == mapped_filename:
-                attribute_name = attr
-                break
-
-        if attribute_name is None:
-            attribute_name = filepath.stem
-
-        try:
-            data = fl.load(filepath)
-
-            if set_attribute:
-                setattr(self, attribute_name, data)
-
-            return attribute_name, data
-
-        except Exception:
-            if set_attribute:
-                setattr(self, attribute_name, [])
-            return attribute_name, []
+        
+        # Initialize analysis pipeline
+        self._pipeline = None
 
     def load_file(
             self,
@@ -359,108 +166,50 @@ class SpineDataset:
         >>> segmenter.load_file('path/to/custom_analysis.h5')
         ('custom_analysis', [...])  # Custom files get stem as attribute name
         """
-        return self._load_file(filepath, set_attribute=True)
+        attr_name, data = self.data_loader.load_file(filepath)
+        setattr(self, attr_name, data)
+        
+        return attr_name, data
 
     @property
     def segmentation_params(self) -> dict:
         """Parameters for semantic segmentation pipeline."""
-        return {
-            'device': self.device,
-            'segmentation_model_fn': self.segmentation_model_fn,
-            'spine_threshold': self.spine_threshold,
-            'min_spine_size': self.min_spine_size,
-            'mask_size': self.mask_size,
-            'min_distance': self.min_distance,
-            'dendrite_threshold': self.dendrite_threshold,
-            'min_dendrite_size': self.min_dendrite_size,
-            'dendrite_dilation_iterations': self.dendrite_dilation_iterations}
+        return self.config.segmentation_params
 
     @property
     def classification_params(self) -> dict:
         """Parameters for calcium event classification."""
-        return {
-            'classifier_model_fn': self.classifier_model_fn,
-        }
+        return self.config.classification_params
 
     @property
     def params(self) -> dict:
         """Combined parameters for backward compatibility."""
-        return {**self.segmentation_params, **self.classification_params}
+        return self.config.params
+    
+    @property
+    def pipeline(self) -> SpineAnalysisPipeline:
+        """Analysis pipeline for spine processing workflows."""
+        if self._pipeline is None:
+            self._pipeline = SpineAnalysisPipeline(
+                dataset=self._dataset,
+                config=self.config,
+                data_loader=self.data_loader
+            )
+        return self._pipeline
 
-    def _load_data(
-            self,
-            path: str or Path = None
-    ) -> None:
+    def _load_data(self) -> None:
         """
         Load precomputed data (if available) for faster analysis.
-
-        This method checks for the existence of precomputed `.h5` files in the
-        dataset's parent directory. If the files exist, they are loaded
-        into memory using the `_load_file` method. Otherwise, the corresponding
-        attributes are initialized as empty lists.
-
-        Parameters
-        ----------
-        path : str or Path, optional
-            Path to the directory containing precomputed data files.
-            If None, uses the dataset's parent directory.
-
-        Attributes Initialized or Updated
-        ---------------------------------
-        spines_data : list
-            Processed spine data for all ROIs.
-        spine_predictions : list
-            Raw neural network predictions for spine segmentation.
-        dendrite_predictions : list
-            Raw neural network predictions for dendrite segmentation.
-        zscores_CA3 : list
-            Z-scores for CA3 spines.
-        dFF_CA3 : list
-            dF/F values for CA3 spines.
-        ts_CA3 : list
-            Time series for CA3 spines.
-        zscores_BLA : list
-            Z-scores for BLA spines.
-        dFF_BLA : list
-            dF/F values for BLA spines.
-        ts_BLA : list
-            Time series for BLA spines.
-        calcium_events_BLA : list
-            Calcium event probability for BLA spines.
-        calcium_events_CA3 : list
-            Calcium event probability for CA3 spines.
+        Uses SpineDataLoader to handle missing files and load
+        all available .h5 files into their corresponding attributes.
         """
-        # Use processed/spines as the default path for all .h5 files
-        if path is None:
-            path = self._dataset.folder
 
-        if not isinstance(path, Path):
-            path = Path(path)
+        loaded_data = self.data_loader.load_multiple_files()
+        
+        for attr_name, data in loaded_data.items():
+            setattr(self, attr_name, data)
 
-        files = self._files_mapping
-
-        existing_files = {
-            attr: filename for attr, filename in files.items()
-            if (path / filename).exists()}
-        missing_files = {
-            attr: filename for attr, filename in files.items()
-            if not (path / filename).exists()}
-
-        # Initialize missing files as empty lists
-        for attr in missing_files:
-            setattr(self, attr, [])
-
-        # Load existing files using _load_file method
-        if existing_files:
-            for attr, filename in tqdm(
-                    existing_files.items(),
-                    desc="Loading .h5 data",
-                    total=len(existing_files)):
-
-                file_path = path / filename
-                self._load_file(file_path, set_attribute=True)
-
-        # Update spine counts
+        # TODO: Remove this in future versions? Handle better?
         self.n_spines = len(getattr(self, 'spines_data', []))
 
     def collect_all_data(
@@ -472,13 +221,15 @@ class SpineDataset:
         Collect and process spine and dendrite segmentation data
         and collects within-spine time series
         for the entire dataset.
+        
         This method performs the following steps:
         1. Runs the semantic segmentation pipeline for all ROIs,
            storing the results in `spines_data` and `dendrites_data`.
-        2. Associates segmented spines with their corresponding ROI
-           segmenters for indexing.
-        3. Collects timeseries data (z-scores, dF/F, timestamps)
-        for all segmented spines.
+        2. Collects timeseries data (z-scores, dF/F, timestamps)
+           for all segmented spines.
+        3. Detects calcium events in spines using a trained neural
+           network classifier.
+        
         Parameters
         ----------
         save : bool
@@ -486,6 +237,7 @@ class SpineDataset:
         save_path : str or Path, optional
             Directory where the `.h5` files will be saved.
             If None, uses the dataset's parent folder.
+            
         Attributes Updated
         ------------------
         spines_data : list
@@ -496,33 +248,32 @@ class SpineDataset:
             Raw neural network predictions for spine segmentation.
         dendrite_predictions : list
             Raw neural network predictions for dendrite segmentation.
+        zscores_CA3, dFF_CA3, ts_CA3 : np.ndarray
+            Time series data for CA3 spines.
+        zscores_BLA, dFF_BLA, ts_BLA : np.ndarray
+            Time series data for BLA spines.
+        calcium_event_probabilities_BLA, calcium_event_probabilities_CA3 : list
+            Calcium event detection results.
+            
         Notes
         -----
-        - Spine and dendrite segmentation is performed using a deep learning
-          model configured in `self.params`.
-        - Timeseries data collection extracts relevant information
-            (e.g., z-scores, dF/F) for all spines detected during segmentation.
-            """
-        output_folder = (
-            self._dataset.folder / "processed" / "spines"
-            if save_path is None else save_path)
+        - Uses SpineAnalysisPipeline for organized workflow execution.
+        - Maintains backward compatibility by setting instance attributes.
+        """
 
-        spine_datasets = self._collect_spines_and_dendrites_data(
+        results = self.pipeline.run_pipeline(
             save=save,
-            save_path=output_folder
-        )
+            save_path=save_path)
+        
+        for attr_name, data in results.items():
+            setattr(self, attr_name, data)
+        
+        self.n_spines = len(getattr(self, 'spines_data', []))
+        
+        # Store spine datasets for ROI access
+        self._spine_datasets = self.pipeline.get_spine_datasets()
 
-        self._collect_timeseries(
-            save=save,
-            save_path=output_folder
-        )
-
-        self._calcium_events_predictions(
-            save=save,
-            save_path=output_folder
-        )
-
-    def _collect_spines_and_dendrites_data(
+    def collect_spines_and_dendrites_data(
             self,
             save: bool,
             save_path: str or Path = None,
@@ -549,82 +300,31 @@ class SpineDataset:
             Processed spine data for all ROIs.
         dendrites_data : list
             Processed dendrite data for all ROIs.
-        zscores_CA3 : np.ndarray
-            Z-scores for CA3 spines.
-        dFF_CA3 : np.ndarray
-            dF/F values for CA3 spines.
-        ts_CA3 : np.ndarray
-            Timestamps for CA3 spines.
-        zscores_BLA : np.ndarray
-            Z-scores for BLA spines.
-        dFF_BLA : np.ndarray
-            dF/F0 values for BLA spines.
-        ts_BLA : np.ndarray
-            Timestamps for BLA spines.
+        spine_predictions : list
+            Raw neural network predictions for spine segmentation.
+        dendrite_predictions : list
+            Raw neural network predictions for dendrite segmentation.
 
         Notes
         -----
-        - Spine and dendrite segmentation is performed using a deep learning
-            model configured in `self.params`.
-        - Timeseries data collection extracts relevant information
-            (e.g., z-scores, dF/F) for all spines detected during segmentation.
+        - Uses SpineAnalysisPipeline for organized segmentation workflow.
+        - Maintains backward compatibility by setting instance attributes.
         """
-        output_folder = (
-            self._dataset.folder / "processed" / "spines"
-            if save_path is None else save_path)
-
-        (
-            spine_datasets,
-            self.spines_data,
-            self.dendrites_data,
-            self.spine_predictions,
-            self.dendrite_predictions
-        ) = semantic_segmentation_pipeline(
-            dataset=self._dataset,
-            spine_dataset=self,
-            config=self.segmentation_params
+        # Run segmentation pipeline
+        results = self.pipeline.run_segmentation_pipeline(
+            save=save,
+            save_path=save_path
         )
-
-        # Store spine_datasets as instance attribute for later use
-        self._spine_datasets = spine_datasets
-
+        
+        for attr_name, data in results.items():
+            setattr(self, attr_name, data)
+        
         self.n_spines = len(self.spines_data)
+        self._spine_datasets = self.pipeline.get_spine_datasets()
+        
+        return self._spine_datasets
 
-    # Link the precomputed spines data to the RoiSpine
-        spine_counter = 0
-        for roi_index, segmenter in enumerate(spine_datasets):
-            n_spines_per_roi = len(
-                [z for z in self.spines_data
-                 if z['roi_n'] == roi_index])
-
-            if n_spines_per_roi == 0:
-                segmenter.spines_data = []
-                continue
-
-            segmenter.spines_data = self.spines_data[
-                spine_counter:spine_counter + n_spines_per_roi]
-            spine_counter += n_spines_per_roi
-
-        if save:
-            saving_folder = (
-                self._dataset.folder / "processed" / "spines"
-                if save_path is None else save_path)
-
-            data_to_save = {
-                "spines_data.h5": getattr(self, 'spines_data', []),
-                "dendrites_data.h5": getattr(self, 'dendrites_data', []),
-                "spine_predictions.h5":
-                    getattr(self, 'spine_predictions', []),
-                "dendrite_predictions.h5":
-                    getattr(self, 'dendrite_predictions', [])
-            }
-
-            for filename, data in data_to_save.items():
-                self._save_to_h5(data, output_folder, filename)
-
-        return spine_datasets
-
-    def _collect_timeseries(
+    def collect_timeseries(
             self,
             save: bool,
             save_path: str or Path = None
@@ -646,6 +346,11 @@ class SpineDataset:
         ------
         ValueError
             If spine data is not available (run segmentation first).
+            
+        Notes
+        -----
+        - Uses SpineAnalysisPipeline for organized timeseries collection.
+        - Maintains backward compatibility by setting instance attributes.
         """
         # Check dependencies
         if not hasattr(self, 'spines_data') or not self.spines_data:
@@ -653,38 +358,17 @@ class SpineDataset:
                 "Spine data required. "
                 "Run _collect_spines_and_dendrites_data() first.")
 
-        saving_folder = (
-            self._dataset.folder / "processed" / "spines"
-            if save_path is None else save_path)
-
-        (
-            self.zscores_CA3,
-            self.dFF_CA3,
-            self.ts_CA3,
-            self.zscores_BLA,
-            self.dFF_BLA,
-            self.ts_BLA
-        ) = collect_timeseries(
-            dataset=self._dataset,
+        # Run timeseries pipeline
+        results = self.pipeline.run_timeseries_pipeline(
             spines_data=self.spines_data,
-            metadata=self.metadata,
-            device=self.device,
-            output_folder=saving_folder)
+            save=save,
+            save_path=save_path
+        )
+        
+        for attr_name, data in results.items():
+            setattr(self, attr_name, data)
 
-        if save:
-            data_to_save = {
-                "zscores_CA3.h5": getattr(self, 'zscores_CA3', []),
-                "dFF_CA3.h5": getattr(self, 'dFF_CA3', []),
-                "ts_CA3.h5": getattr(self, 'ts_CA3', []),
-                "zscores_BLA.h5": getattr(self, 'zscores_BLA', []),
-                "dFF_BLA.h5": getattr(self, 'dFF_BLA', []),
-                "ts_BLA.h5": getattr(self, 'ts_BLA', [])
-            }
-
-            for filename, data in data_to_save.items():
-                self._save_to_h5(data, saving_folder, filename)
-
-    def _calcium_events_predictions(
+    def calcium_events_predictions(
             self,
             save: bool,
             save_path: str or Path = None
@@ -702,7 +386,7 @@ class SpineDataset:
         save : bool, optional
             Whether to save the calcium event data to .h5 files.
             Default is True.
-        saving_folder : str or Path, optional
+        save_path : str or Path, optional
             Directory where the .h5 files will be saved.
             If None, uses the dataset's parent folder.
 
@@ -715,89 +399,216 @@ class SpineDataset:
 
         Notes
         -----
-        - This method requires that timeseries data has been collected first
-              (i.e., `_collect_timeseries()` should be run before this method).
-        - The method uses the calcium event classifier to predict calcium events
-              from dF/F0 traces.
-        - This method is typically called automatically
-            by `collect_all_data()`.
+        - Uses SpineAnalysisPipeline for organized calcium event detection.
+        - Maintains backward compatibility by setting instance attributes.
 
         Raises
         ------
         ValueError
-            If time series data is not available (run `collect_all_data()` first).
+            If time series data is not available.
         """
-        # if not hasattr(self, 'zscores_BLA') or not self.zscores_BLA:
-        #     raise ValueError(
-        #         "Z-scored data not available. "
-        #         "Run collect_all_data() first."
-        #     )
+        # Prepare timeseries data for pipeline
+        timeseries_data = {
+            'zscores_BLA': getattr(self, 'zscores_BLA', []),
+            'dFF_BLA': getattr(self, 'dFF_BLA', []),
+            'zscores_CA3': getattr(self, 'zscores_CA3', []),
+            'dFF_CA3': getattr(self, 'dFF_CA3', [])
+        }
+        
+        # Run calcium events pipeline
+        results = self.pipeline.run_calcium_events_pipeline(
+            timeseries_data=timeseries_data,
+            save=save,
+            save_path=save_path
+        )
+        
+        for attr_name, data in results.items():
+            setattr(self, attr_name, data)
 
-        output_folder = (
-            self._dataset.folder / "analysis" / "spines"
-            if save_path is None else save_path)
-
-        if not output_folder.exists():
-            output_folder.mkdir(parents=True)
-
-        self.calcium_event_probabilities_BLA = detect_calcium_events(
-            config=self.classification_params,
-            zscores=self.zscores_BLA,
-            dFF=self.dFF_BLA)
-
-        self.calcium_event_probabilities_CA3 = detect_calcium_events(
-            config=self.classification_params,
-            zscores=self.zscores_CA3,
-            dFF=self.dFF_CA3)
-
-        if save:
-
-            calcium_events_to_save = {
-                "calcium_event_probabilities_BLA.h5":
-                    getattr(self, 'calcium_event_probabilities_BLA', []),
-                "calcium_event_probabilities_CA3.h5":
-                    getattr(self, 'calcium_event_probabilities_CA3', []),
-            }
-
-            for filename, data in calcium_events_to_save.items():
-                self._save_to_h5(data, output_folder, filename)
-
-    def _save_to_h5(
+    @cached_property
+    def _spine_indices_by_roi(self) -> dict:
+        """
+        Cache spine indices grouped by ROI for efficient lookup.
+        
+        Returns
+        -------
+        dict
+            Dictionary mapping ROI indices to lists of spine indices.
+            
+        Example: 
+            {0: [0, 1, 2], 1: [3, 4], ...}
+            where keys are ROI indices and values are lists of spine indices.
+        """
+        indices_by_roi = {}
+        
+        for n, spine in enumerate(self.spines_data):
+            roi_n = spine['roi_n']
+            if roi_n not in indices_by_roi:
+                indices_by_roi[roi_n] = []
+            indices_by_roi[roi_n].append(n)
+        
+        return indices_by_roi
+    
+    @cached_property
+    def _spines_by_branch(self) -> dict:
+        """
+        Cache spines grouped by branch ID for efficient lookup.
+        
+        Returns
+        -------
+        dict
+            Dictionary mapping branch IDs to lists of spines.
+        """
+        spines_by_branch = {}
+        
+        for spine in self.spines_data:
+            branch_id = spine['branch_id']
+            if branch_id not in spines_by_branch:
+                spines_by_branch[branch_id] = []
+            spines_by_branch[branch_id].append(spine)
+        
+        return spines_by_branch
+    
+    @cached_property
+    def _spines_by_branch_degree(self) -> dict:
+        """
+        Cache spines grouped by branch degree for efficient lookup.
+        
+        Returns
+        -------
+        dict
+            Dictionary mapping branch degrees to lists of spines.
+        """
+        spines_by_degree = {}
+        
+        for spine in self.spines_data:
+            branch_degree = spine['branch_degree']
+            if branch_degree not in spines_by_degree:
+                spines_by_degree[branch_degree] = []
+            spines_by_degree[branch_degree].append(spine)
+        
+        return spines_by_degree
+    
+    def spines_by_roi(
             self,
-            data,
-            output_folder: str or Path,
-            filename: str
-    ) -> None:
+            roi_index: int,
+    ) -> list:
         """
-        Generic function to save data to an .h5 file.
+        Retrieve spines associated with a specific ROI index.
 
         Parameters
         ----------
-        data : any
-            Data to save. Only saves if data exists and is not empty.
-        output_folder : str or Path
-            Directory where the .h5 file will be saved.
-        filename : str
-            Name of the .h5 file to save.
+        roi_index : int
+            ROI index to filter spines.
+
+        Returns
+        -------
+        list
+            List of spines associated with the specified ROI index.
+            Sublist of self.spines_data.
         """
-        if not isinstance(output_folder, Path):
-            output_folder = Path(output_folder)
+        if not isinstance(roi_index, int):
+            raise TypeError("roi_index must be an integer")
+        
+        if roi_index < 0:
+            raise ValueError("roi_index must be non-negative")
 
-        if not output_folder.exists():
-            raise FileNotFoundError(
-                f"Output folder {output_folder} does not exist.")
+        if roi_index >= len(self._dataset):
+            raise IndexError("Roi index out of range.")
 
-        if not output_folder.is_dir():
-            raise NotADirectoryError(
-                f"Output path {output_folder} is not a directory.")
+        spine_indices = self._spine_indices_by_roi.get(roi_index, [])
 
-        if not filename.endswith('.h5'):
-            raise ValueError(
-                f"Filename {filename} must end with '.h5'.")
+        if not spine_indices:
+            raise ValueError("Selected ROI has no detected spines.")
 
-        if data is not None and len(data) > 0:
-            fl.save(output_folder / filename, data)
-            print(f"Saved {filename} to {output_folder}")
+        return self._fetch_spine_data(self.spines_data, spine_indices)
+
+    def spines_by_branch(
+            self,
+            branch_id: int,
+    ) -> list:
+        """
+        Retrieve spines associated with a specific branch ID.
+
+        Parameters
+        ----------
+        branch_id : int
+            Branch ID to filter spines.
+
+        Returns
+        -------
+        list
+            List of spines associated with the specified branch ID.
+            Sublist of self.spines_data.
+        """
+        if not isinstance(branch_id, int):
+            raise TypeError("branch_id must be an integer")
+        
+        if branch_id < 0:
+            raise ValueError("branch_id must be non-negative")
+
+        if branch_id >= self._dataset.sf.n_branches:
+            raise IndexError("Branch id out of range.")
+
+        spines = self._spines_by_branch.get(branch_id, [])
+
+        if not spines:
+            raise ValueError("Selected branch has no detected spines.")
+
+        return spines
+
+    def spines_by_branch_degree(self, branch_degree: int) -> list:
+        """
+        Retrieve spines associated with a specific branch degree.
+
+        Parameters
+        ----------
+        branch_degree : int
+            Branch degree to filter spines.
+
+        Returns
+        -------
+        list
+            List of spines associated with the specified branch degree.
+            Sublist of self.spines_data.
+        """
+        if not isinstance(branch_degree, int):
+            raise TypeError("branch_degree must be an integer")
+        
+        if branch_degree < 0:
+            raise ValueError("branch_degree must be non-negative")
+        
+        if branch_degree not in self._spines_by_branch_degree:
+            raise IndexError("Branch degree not found in dataset.")
+
+        return self._spines_by_branch_degree[branch_degree]
+
+    def _fetch_spine_data(
+            self,
+            data_batch: list or np.ndarray,
+            spine_indices: list
+    ) -> np.ndarray:
+        """
+        Helper function to retrieve data from a given ROI based on
+        spine indices.
+
+        Parameters
+        ----------
+        data_batch : list or np.ndarray
+            Batch of spine-related data.
+        spine_indices : list[int]
+            List of indices corresponding to the spines of the given ROI.
+
+        Returns
+        -------
+        list or np.ndarray
+            Filtered data corresponding to the given ROI.
+        """
+
+        if data_batch is None or len(data_batch) == 0:
+            return np.array([])
+        
+        return np.array(data_batch)[spine_indices]
 
     @cache
     def _get_roi(self, roi_index: int) -> RoiSpine:
@@ -823,9 +634,8 @@ class SpineDataset:
 
         roi_metadata = self.metadata[roi_index]
 
-        spine_indices = [
-            n for n, i in enumerate(self.spines_data)
-            if i['roi_n'] == roi_index]
+        # Use cached spine indices for efficient lookup
+        spine_indices = self._spine_indices_by_roi.get(roi_index, [])
 
         selected_dFF_CA3 = self._fetch_spine_data(
             self.dFF_CA3, spine_indices)
@@ -884,12 +694,6 @@ class SpineDataset:
                 f'Roi {roi_index} out of range {len(self._dataset.roi_list)}')
         return self._get_roi(roi_index)
 
-    def __getattr__(self, name: str):
-        return self.__dict__[f"_{name}"]
-
-    def __setattr__(self, name: str, value):
-        self.__dict__[f"_{name}"] = value
-
     def __iter__(self):
         self._current_index = 0
         return self
@@ -904,84 +708,8 @@ class SpineDataset:
 
     def __len__(self) -> int:
         return len(self._dataset)
-
-    def spines_by_branch(
-            self,
-            branch_id: int,
-    ) -> list:
-        """
-        Retrieve spines associated with a specific branch ID.
-
-        Parameters
-        ----------
-        branch_id : int
-            Branch ID to filter spines.
-
-        Returns
-        -------
-        list
-            List of spines associated with the specified branch ID.
-            Sublist of self.spines_data.
-        """
-
-        if branch_id not in np.arange(self._dataset.sf.n_branches):
-            raise IndexError("Branch id out of range.")
-
-        spines = [
-            spine for spine in self.spines_data
-            if spine['branch_id'] == branch_id]
-
-        if not spines:
-            raise ValueError("Selected branch has no detected spines.")
-
-        return spines
-
-    def spines_by_branch_degree(self, branch_degree: int) -> list:
-        """
-        Retrieve spines associated with a specific branch degree.
-
-        Parameters
-        ----------
-        branch_degree : int
-            Branch degree to filter spines.
-
-        Returns
-        -------
-        list
-            List of spines associated with the specified branch degree.
-            Sublist of self.spines_data.
-        """
-
-        return [
-            spine for spine in self.spines_data
-            if spine['branch_degree'] == branch_degree]
-
-    def _fetch_spine_data(
-            self,
-            data_batch: list or np.ndarray,
-            spine_indices: list
-    ) -> np.ndarray:
-        """
-        Helper function to retrieve data from a given ROI based on
-        spine indices.
-
-        Parameters
-        ----------
-        data_batch : list or np.ndarray
-            Batch of spine-related data.
-        spine_indices : list[int]
-            List of indices corresponding to the spines of the given ROI.
-
-        Returns
-        -------
-        list or np.ndarray
-            Filtered data corresponding to the given ROI.
-        """
-
-        return (
-            np.array(data_batch)[spine_indices]
-            if data_batch is not None and len(data_batch) > 0
-            else [])
+    
+    
 
 
 class RoiSpine:
