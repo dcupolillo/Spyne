@@ -944,7 +944,9 @@ class RoiSpine:
             selected_ts_CA3,
             selected_dFF_BLA,
             selected_zscore_BLA,
-            selected_ts_BLA,)
+            selected_ts_BLA,
+            self.params  # Pass params including device info
+        )
 
     def __getitem__(self, spine_index) -> Spine:
         if self.spines_data is None:
@@ -991,6 +993,7 @@ class Spine:
             selected_dFF_BLA,
             selected_zscore_BLA,
             selected_ts_BLA,
+            params,
     ) -> None:
 
         self.spine_index = spine_index
@@ -1005,13 +1008,13 @@ class Spine:
         self.zscore_BLA = selected_zscore_BLA
         self.ts_BLA = selected_ts_BLA
 
-        self.device = (
-            '/GPU:0' if tf.config.list_physical_devices('GPU') else '/CPU:0')
-
         for attr, key in self.metadata.items():
             setattr(self, attr, key)
 
         for attr, key in roi_metadata.items():
+            setattr(self, attr, key)
+
+        for attr, key in params.items():
             setattr(self, attr, key)
 
     def f(
