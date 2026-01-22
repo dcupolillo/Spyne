@@ -40,8 +40,8 @@ class SpineDatasetConfig:
         **parameter_overrides
             Additional parameters to override config values.
         """
-        self.config = self._load_config(config_path)
         self.repo_root = Path(__file__).parent.parent.parent
+        self.config = self._load_config(config_path)
         
         # Resolve model paths
         self.segmentation_model_fn = self._resolve_path(

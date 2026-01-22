@@ -69,7 +69,9 @@ class ImagingDatasetConfig:
         
         if config_path is None:
             # Use default config in package
-            config_path = Path(__file__).parent.parent /"config" / "imaging_config.yaml"
+            config_path = (
+                Path(__file__).parent.parent.parent /
+                "config" / "imaging_config.yaml")
         
         config_path = Path(config_path)
         
@@ -105,8 +107,6 @@ class ImagingDatasetConfig:
             raise ValueError("Spatial kernel sizes must be numeric")
         if not isinstance(t, int) or t <= 0:
             raise ValueError("Temporal kernel size must be a positive integer")
-        if int(x) % 2 == 0 or int(y) % 2 == 0:
-            raise ValueError("Spatial kernel sizes must be odd integers")
         
         # Validate PMT threshold
         threshold = self._config['processing']['pmt_artifact_detection_threshold']

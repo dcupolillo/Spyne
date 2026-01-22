@@ -161,7 +161,7 @@ class ImagingDataset:
 
     def _load_metadata(
         self,
-        metadata_filename: str or Path
+        metadata_filename: str or Path = None
     ) -> list:
         """
         Private method to load metadata for all ROIs.
@@ -207,7 +207,7 @@ class ImagingDataset:
 
     def _load_data(
         self,
-        processed_data_filename: str or Path
+        processed_data_filename: str or Path = None
     ) -> list:
         """
         Private method to load and process imaging data.

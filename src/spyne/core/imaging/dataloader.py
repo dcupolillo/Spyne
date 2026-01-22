@@ -183,7 +183,7 @@ class ImagingDataLoader:
                 n_rois = len(metadata)
                 roi_list = np.arange(n_rois)
                 
-                print(f"✓ Loaded metadata from {filepath}")
+                print(f"Loaded metadata from {filepath}")
                 return metadata, n_rois, roi_list
                 
             except Exception as e:
@@ -229,10 +229,10 @@ class ImagingDataLoader:
             try:
                 preprocessed_data = fl.load(filepath)
 
-                if isinstance(preprocessed_data, dict) and 'preprocessed_data' in preprocessed_data:
-                    data = preprocessed_data['preprocessed_data']  # New format
+                if isinstance(preprocessed_data, dict) and 'processed_arrays' in preprocessed_data:
+                    data = preprocessed_data['processed_arrays']  # Correct key
                 else:
-                    data = preprocessed_data  # Old format
+                    data = preprocessed_data  # Old format (direct arrays)
 
                 # Validate data
                 if not data:
