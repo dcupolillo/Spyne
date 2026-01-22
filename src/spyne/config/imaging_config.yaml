@@ -1,0 +1,21 @@
+# Configuration for ImagingDataset
+# Created on January 21, 2026
+# @author: dcupolillo
+
+# ==============================================================================
+# Processing Parameters
+# ==============================================================================
+
+# Preprocessing settings
+processing:
+  # Kernel size for 3D median filtering in micrometers (x, y, z)
+  # (spatial, spatial, temporal)
+  kernel_size_um: [0.3, 0.3, 3]
+  
+  # PMT artifact detection threshold multiplier
+  pmt_artifact_detection_threshold: 3
+  
+  # Enable/disable specific preprocessing steps
+  enable_median_filter: true
+  enable_pmt_correction: true
+

@@ -1,4 +1,6 @@
-# Spyne Configuration File
+# Configuration for SpineDataset
+# Created on January 21, 2026
+# @author: dcupolillo
 # Default paths and parameters for spine segmentation and analysis
 
 models:
@@ -19,5 +21,4 @@ segmentation:
   dendrite_dilation_iterations: 12
   
 classification:
-  percentile_cutoff: 99
   description: Percentile threshold for calcium event probability

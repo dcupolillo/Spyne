@@ -84,7 +84,6 @@ class SpineDataLoader:
     def load_file(
         self,
         filepath: str or Path,
-        validate_extension: bool = True
     ) -> tuple:
         """
         Load a single .h5 file and return attribute name and data.
@@ -93,8 +92,6 @@ class SpineDataLoader:
         ----------
         filepath : str or Path
             Path to the .h5 file to load.
-        validate_extension : bool, optional
-            Whether to validate file extension is .h5. Default is True.
             
         Returns
         -------
@@ -113,7 +110,7 @@ class SpineDataLoader:
         if not filepath.exists():
             raise FileNotFoundError(f"File {filepath} does not exist")
         
-        if validate_extension and filepath.suffix != '.h5':
+        if filepath.suffix != '.h5':
             raise ValueError(f"File {filepath} must be a .h5 file")
         
         # Determine attribute name from filename mapping
@@ -198,8 +195,6 @@ class SpineDataLoader:
         self,
         data: any,
         output_path: str or Path,
-        filename: str or Path,
-        create_dirs: bool = True
     ) -> None:
         """
         Save data to an .h5 file.
@@ -209,11 +204,7 @@ class SpineDataLoader:
         data : Any
             Data to save.
         output_path : str or Path
-            Directory where the file will be saved.
-        filename : str or Path
-            Name of the .h5 file.
-        create_dirs : bool, optional
-            Whether to create directories if they don't exist. Default is True.
+            Name of the file will be saved.
             
         Raises
         ------
@@ -226,64 +217,20 @@ class SpineDataLoader:
         """
         output_path = Path(output_path)
         
-        # Validate inputs
-        self._validate_save_inputs(data, output_path, filename, create_dirs)
+        if not output_path.name.endswith('.h5'):
+            raise ValueError(f"Filename {output_path.name} must end with '.h5'")
+        
+        if data is None or (hasattr(data, '__len__') and len(data) == 0):
+            print(f"Warning: No data to save for {output_path.name}")
+            return
         
         # Create directories if needed
-        if create_dirs and not output_path.exists():
-            output_path.mkdir(parents=True, exist_ok=True)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Save data
         if data is not None and len(data) > 0:
-            fl.save(output_path / filename, data)
-            print(f"Saved {filename} to {output_path}")
-    
-    def _validate_save_inputs(
-        self,
-        data: any,
-        output_path: Path,
-        filename: str or Path,
-        create_dirs: bool
-    ) -> None:
-        """
-        Validate inputs for save operation.
-        
-        Parameters
-        ----------
-        data : Any
-            Data to save.
-        output_path : Path
-            Output directory path.
-        filename : str or Path
-            Output filename.
-        create_dirs : bool
-            Whether directories will be created.
-            
-        Raises
-        ------
-        ValueError
-            If inputs are invalid.
-        FileNotFoundError
-            If output directory doesn't exist and create_dirs is False.
-        NotADirectoryError
-            If output_path exists but is not a directory.
-        """
-        if not filename.endswith('.h5'):
-            raise ValueError(f"Filename {filename} must end with '.h5'")
-        
-        if data is None or (hasattr(data, '__len__') and len(data) == 0):
-            print(f"Warning: No data to save for {filename}")
-            return
-        
-        if output_path.exists():
-            if not output_path.is_dir():
-                raise NotADirectoryError(
-                    f"Output path {output_path} is not a directory"
-                )
-        elif not create_dirs:
-            raise FileNotFoundError(
-                f"Output folder {output_path} does not exist"
-            )
+            fl.save(output_path, data)
+            print(f"Saved {output_path.name} to {output_path.parent}")
     
     def save_multiple_files(
         self,
@@ -317,3 +264,38 @@ class SpineDataLoader:
                 filename = filename_mapping[attr_name]
                 self.save_file(data, output_path, filename)
     
+    def get_existing_files(self) -> dict:
+        """
+        Get dictionary of existing data files.
+        
+        Returns
+        -------
+        dict
+            Dictionary mapping attribute names to existing file paths.
+        """
+        existing = {}
+        
+        for attr, relative_path in self._files_mapping.items():
+            full_path = self.base_path / relative_path
+            if full_path.exists():
+                existing[attr] = full_path
+        
+        return existing
+    
+    def get_missing_files(self) -> dict:
+        """
+        Get dictionary of missing data files.
+        
+        Returns
+        -------
+        dict
+            Dictionary mapping attribute names to expected file paths.
+        """
+        missing = {}
+        
+        for attr, relative_path in self._files_mapping.items():
+            full_path = self.base_path / relative_path
+            if not full_path.exists():
+                missing[attr] = full_path
+        
+        return missing
