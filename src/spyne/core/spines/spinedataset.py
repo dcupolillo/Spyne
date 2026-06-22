@@ -42,16 +42,25 @@ class SpineDataset:
     def __init__(
         self,
         dataset: ImagingDataset,
-        config_path: str or Path = None,
-        segmentation_model_fn: str or Path = None,
+        config_path: str | Path = None,
+        # Algorithm selection and model paths
+        segmentation_algorithm: str = None,
+        deepd3_model_fn: str | Path = None,
+        nnunet_model_fn: str | Path = None,
+        # CARE denoising parameters
+        care_model_fn: str | Path = None,
+        enable_denoising: bool = None,
+        # Threshold for deepd3 outputs
         spine_threshold: float = None,
         dendrite_threshold: float = None,
+        # Post-processing parameters
         mask_size: int = None,
         min_distance: int = None,
         min_spine_size: float = None,
         min_dendrite_size: float = None,
         dendrite_dilation_iterations: int = None,
-        classifier_model_fn: str or Path = None,
+        # calcium event classifier
+        classifier_model_fn: str | Path = None,
     ) -> None:
         """
         Initialize the SpineDataset class.
@@ -60,12 +69,19 @@ class SpineDataset:
         ----------
         dataset : ImagingDataset
             The imaging dataset to process.
-        config_path : str or Path, optional
+        config_path : str | Path, optional
             Path to configuration file. If None, uses default location
-            (config/spyne_config.yaml). Default is None.
-        segmentation_model_fn : str or Path, optional
+            (config/spine_config.yaml). Default is None.
+        segmentation_model_fn : str | Path, optional
             Path to the trained model file for segmentation.
             Overrides config file value. Default is None.
+        care_model_fn : str | Path, optional
+            Path to the trained CARE denoising model file.
+            Overrides config file value. Default is None.
+        enable_denoising : bool, optional
+            Whether to enable CARE denoising before segmentation.
+            Overrides ``denoising.care_parameters.enabled`` in the config
+            file. Default is None (uses config value).
         spine_threshold : float, optional
             Threshold for spine segmentation.
             Overrides config file value. Default is None.
@@ -87,7 +103,7 @@ class SpineDataset:
         dendrite_dilation_iterations : int, optional
             Number of dilation iterations for dendrite segmentation.
             Overrides config file value. Default is None.
-        classifier_model_fn : str or Path, optional
+        classifier_model_fn : str | Path, optional
             Path to the trained model file for calcium event classification.
             Overrides config file value. Default is None.
 
@@ -103,7 +119,7 @@ class SpineDataset:
         Configuration priority (highest to lowest):
         1. Arguments passed to __init__
         2. Values from config_path YAML file
-        3. Default values in config/spyne_config.yaml
+        3. Default values in config/spine_config.yaml
 
         Order of operations:
         1. Load configuration
@@ -120,8 +136,12 @@ class SpineDataset:
         # Initialize configuration manager
         self.config = SpineDatasetConfig(
             config_path=config_path,
-            segmentation_model_fn=segmentation_model_fn,
+            segmentation_algorithm=segmentation_algorithm,
+            deepd3_model_fn=deepd3_model_fn,
+            nnunet_model_fn=nnunet_model_fn,
+            care_model_fn=care_model_fn,
             classifier_model_fn=classifier_model_fn,
+            care_enabled=enable_denoising,
             spine_threshold=spine_threshold,
             dendrite_threshold=dendrite_threshold,
             mask_size=mask_size,
@@ -131,45 +151,22 @@ class SpineDataset:
             dendrite_dilation_iterations=dendrite_dilation_iterations
         )
 
-        # Load pre-computed data
+        # Initialize algorithm-aware storage
+        self._segmentation_results = {}
+        self._timeseries_results = {}
+        self._calcium_events_results = {}
+        self._current_algorithm = (
+            f"{self.config.segmentation_algorithm}_care"
+            if self.config.care_enabled
+            else self.config.segmentation_algorithm
+        )
+        
+        # Initialize data loader manager and load pre-computed data
         self.data_loader = SpineDataLoader(self._dataset.folder)
         self._load_data()
         
         # Initialize analysis pipeline
         self._pipeline = None
-
-    def load_file(
-            self,
-            filepath: str or Path
-    ) -> tuple:
-        """
-        Load a single .h5 file and set it as an instance attribute.
-
-        This is a public method that allows loading individual data files
-        by pathname. The attribute name is inferred from the filename.
-
-        Parameters
-        ----------
-        filepath : str | Path
-            Path to the .h5 file to load.
-
-        Returns
-        -------
-        tuple
-            Tuple containing (attribute_name, loaded_data).
-
-        Example
-        -------
-        >>> segmenter.load_file('path/to/spines_data.h5')
-        ('spines_data', [...])  # Returns attribute name and loaded data
-
-        >>> segmenter.load_file('path/to/custom_analysis.h5')
-        ('custom_analysis', [...])  # Custom files get stem as attribute name
-        """
-        attr_name, data = self.data_loader.load_file(filepath)
-        setattr(self, attr_name, data)
-        
-        return attr_name, data
 
     @property
     def segmentation_params(self) -> dict:
@@ -196,26 +193,392 @@ class SpineDataset:
                 data_loader=self.data_loader
             )
         return self._pipeline
+    
+    @property
+    def spines_data(self) -> list:
+        """Processed spine data from semantic segmentation."""
+        if self._current_algorithm in self._segmentation_results:
+            return self._segmentation_results[self._current_algorithm].get('spines_data', [])
+        return getattr(self, '_spines_data', [])
+    
+    @property
+    def dendrites_data(self) -> list:
+        """Processed dendrite data from semantic segmentation."""
+        if self._current_algorithm in self._segmentation_results:
+            return self._segmentation_results[self._current_algorithm].get('dendrites_data', [])
+        return getattr(self, '_dendrites_data', [])
+    
+    @property
+    def spine_predictions(self) -> list:
+        """Raw neural network predictions for spine segmentation."""
+        if self._current_algorithm in self._segmentation_results:
+            return self._segmentation_results[self._current_algorithm].get('spine_predictions', [])
+        return getattr(self, '_spine_predictions', [])
+    
+    @property
+    def dendrite_predictions(self) -> list:
+        """Raw neural network predictions for dendrite segmentation."""
+        if self._current_algorithm in self._segmentation_results:
+            return self._segmentation_results[self._current_algorithm].get('dendrite_predictions', [])
+        return getattr(self, '_dendrite_predictions', [])
+    
+    @property
+    def dendrites_masks(self) -> list:
+        """Binary masks for dendrites."""
+        if self._current_algorithm in self._segmentation_results:
+            return self._segmentation_results[self._current_algorithm].get('dendrites_masks', [])
+        return getattr(self, '_dendrites_masks', [])
+    
+    @property
+    def combined_spines_masks(self) -> list:
+        """Combined binary masks for all spines."""
+        if self._current_algorithm in self._segmentation_results:
+            return self._segmentation_results[self._current_algorithm].get('combined_spines_masks', [])
+        return getattr(self, '_combined_spines_masks', [])
+    
+    @property
+    def zscores_CA3(self) -> list:
+        """Z-scored calcium traces for CA3 spines."""
+        if self._current_algorithm in self._timeseries_results:
+            return self._timeseries_results[self._current_algorithm].get('zscores_CA3', [])
+        return getattr(self, '_zscores_CA3', [])
+    
+    @property
+    def dFF_CA3(self) -> list:
+        """dF/F traces for CA3 spines."""
+        if self._current_algorithm in self._timeseries_results:
+            return self._timeseries_results[self._current_algorithm].get('dFF_CA3', [])
+        return getattr(self, '_dFF_CA3', [])
+    
+    @property
+    def ts_CA3(self) -> list:
+        """Timestamps for CA3 spines."""
+        if self._current_algorithm in self._timeseries_results:
+            return self._timeseries_results[self._current_algorithm].get('ts_CA3', [])
+        return getattr(self, '_ts_CA3', [])
+    
+    @property
+    def zscores_BLA(self) -> list:
+        """Z-scored calcium traces for BLA spines."""
+        if self._current_algorithm in self._timeseries_results:
+            return self._timeseries_results[self._current_algorithm].get('zscores_BLA', [])
+        return getattr(self, '_zscores_BLA', [])
+    
+    @property
+    def dFF_BLA(self) -> list:
+        """dF/F traces for BLA spines."""
+        if self._current_algorithm in self._timeseries_results:
+            return self._timeseries_results[self._current_algorithm].get('dFF_BLA', [])
+        return getattr(self, '_dFF_BLA', [])
+    
+    @property
+    def ts_BLA(self) -> list:
+        """Timestamps for BLA spines."""
+        if self._current_algorithm in self._timeseries_results:
+            return self._timeseries_results[self._current_algorithm].get('ts_BLA', [])
+        return getattr(self, '_ts_BLA', [])
+    
+    @property
+    def calcium_events_probabilities_BLA(self) -> list:
+        """Calcium event probabilities for BLA spines."""
+        if self._current_algorithm in self._calcium_events_results:
+            return self._calcium_events_results[self._current_algorithm].get('calcium_event_probabilities_BLA', [])
+        return getattr(self, '_calcium_events_probabilities_BLA', [])
+    
+    @property
+    def calcium_events_probabilities_CA3(self) -> list:
+        """Calcium event probabilities for CA3 spines."""
+        if self._current_algorithm in self._calcium_events_results:
+            return self._calcium_events_results[self._current_algorithm].get('calcium_event_probabilities_CA3', [])
+        return getattr(self, '_calcium_events_probabilities_CA3', [])
+
+    @property
+    def denoised_images(self) -> list | np.ndarray | None:
+        """CARE-denoised images, unwrapped from care_denoised_images.h5."""
+        raw = getattr(self, '_care_denoised_images', None)
+        if isinstance(raw, dict) and 'denoised_images' in raw:
+            imgs = raw['denoised_images']
+            if isinstance(imgs, dict):
+                # flammkuchen stored ragged arrays as numbered sub-groups
+                return [imgs[str(i)] for i in range(len(imgs))]
+            return imgs
+        return raw
+
+    def set_algorithm(self, algorithm: str) -> None:
+        """
+        Switch to a different algorithm's results.
+
+        Parameters
+        ----------
+        algorithm : str
+            Name of the segmentation algorithm ('deepd3' or 'nnunet').
+
+        Raises
+        ------
+        ValueError
+            If no results exist for the specified algorithm.
+
+        Notes
+        -----
+        - Switches which algorithm's results are accessed via properties.
+        - Updates n_spines and clears cached properties for consistency.
+        
+        Example
+        -------
+        >>> spine_dataset.collect_spines_and_dendrites_data(algorithm='deepd3')
+        >>> spine_dataset.collect_spines_and_dendrites_data(algorithm='nnunet')
+        >>> spine_dataset.set_algorithm('deepd3')  # Switch back to DeepD3
+        >>> print(len(spine_dataset.spines_data))  # Now shows DeepD3 count
+        """
+
+        if algorithm not in self._segmentation_results:
+            available = list(self._segmentation_results.keys())
+            raise ValueError(
+                f"No results for algorithm '{algorithm}'. "
+                f"Available: {available}. "
+                f"Run collect_spines_and_dendrites_data(algorithm='{algorithm}') first.")
+
+        self._current_algorithm = algorithm
+        self.n_spines = len(self.spines_data)
+        self._clear_cached_properties()
+        
+        # Clear ROI cache to force re-creation with new algorithm data
+        if hasattr(self._get_roi, 'cache_clear'):
+            self._get_roi.cache_clear()
+    
+    def available_algorithms(self) -> list[str]:
+        """
+        Get list of algorithms with stored results.
+        
+        Returns
+        -------
+        list[str]
+            List of algorithm names that have been run.
+        
+        Example
+        -------
+        >>> spine_dataset.collect_spines_and_dendrites_data(algorithm='deepd3')
+        >>> spine_dataset.available_algorithms()
+        ['deepd3']
+        >>> spine_dataset.collect_spines_and_dendrites_data(algorithm='nnunet')
+        >>> spine_dataset.available_algorithms()
+        ['deepd3', 'nnunet']
+        """
+        return list(self._segmentation_results.keys())
+    
+    def get_n_spines(self, algorithm: str = None) -> int:
+        """
+        Get number of spines for a specific algorithm.
+        
+        Parameters
+        ----------
+        algorithm : str, optional
+            Algorithm name ('deepd3' or 'nnunet').
+            If None, uses current algorithm.
+        
+        Returns
+        -------
+        int
+            Number of detected spines for the specified algorithm.
+        
+        Example
+        -------
+        >>> n_deepd3 = spine_dataset.get_n_spines('deepd3')
+        >>> n_nnunet = spine_dataset.get_n_spines('nnunet')
+        """
+        algorithm = (
+            algorithm if algorithm is not None
+            else self._current_algorithm
+        )
+        if algorithm in self._segmentation_results:
+            spines = self._segmentation_results[algorithm].get(
+                'spines_data', [])
+            return len(spines)
+        return 0
+    
+    def get_algorithm_data(
+            self,
+            algorithm: str,
+            data_type: str
+    ) -> list | np.ndarray:
+        """
+        Get specific data for an algorithm without changing current algorithm.
+        
+        Parameters
+        ----------
+        algorithm : str
+            Algorithm name ('deepd3' or 'nnunet').
+        data_type : str
+            Type of data to retrieve (e.g., 'spines_data', 'zscores_CA3').
+        
+        Returns
+        -------
+        list | np.ndarray
+            Requested data, or empty list if not found.
+        
+        Example
+        -------
+        >>> spines = spine_dataset.get_algorithm_data('deepd3', 'spines_data')
+        >>> zscores = spine_dataset.get_algorithm_data('nnunet', 'zscores_CA3')
+        """
+        # Check all result categories
+        for results_dict in [
+            self._segmentation_results,
+            self._timeseries_results,
+            self._calcium_events_results
+        ]:
+            if algorithm in results_dict:
+                if data_type in results_dict[algorithm]:
+                    return results_dict[algorithm][data_type]
+        return []
 
     def _load_data(self) -> None:
         """
         Load precomputed data (if available) for faster analysis.
-        Uses SpineDataLoader to handle missing files and load
-        all available .h5 files into their corresponding attributes.
+        Algorithm-aware loading: detects algorithm from filename suffix.
+        
+        Organizes data into three categories:
+        - Segmentation results (spines_data, dendrites_data, etc.)
+        - Timeseries results (zscores, dFF, timestamps)
+        - Calcium event results (event probabilities)
         """
+        # Define which attributes belong to each category
+        SEGMENTATION_ATTRS = {
+            'spines_data', 'dendrites_data', 'spine_predictions',
+            'dendrite_predictions', 'dendrites_masks', 'combined_spines_masks'
+        }
+        TIMESERIES_ATTRS = {
+            'zscores_CA3', 'dFF_CA3', 'ts_CA3',
+            'zscores_BLA', 'dFF_BLA', 'ts_BLA'
+        }
+        CALCIUM_EVENTS_ATTRS = {
+            'calcium_events_probabilities_BLA',
+            'calcium_events_probabilities_CA3'
+        }
 
         loaded_data = self.data_loader.load_multiple_files()
         
         for attr_name, data in loaded_data.items():
-            setattr(self, attr_name, data)
+            # Skip empty placeholders (files that didn't exist on disk)
+            if isinstance(data, list) and len(data) == 0:
+                continue
 
-        # TODO: Remove this in future versions? Handle better?
-        self.n_spines = len(getattr(self, 'spines_data', []))
+            # Check if filename has algorithm suffix (e.g., spines_data_deepd3)
+            algorithm = self._extract_algorithm_from_attr(attr_name)
+            
+            if algorithm:
+                # Store in algorithm-specific dict
+                base_name = attr_name.rsplit(f'_{algorithm}', 1)[0]
+                
+                # Determine which category this attribute belongs to
+                if base_name in SEGMENTATION_ATTRS:
+                    if algorithm not in self._segmentation_results:
+                        self._segmentation_results[algorithm] = {}
+                    self._segmentation_results[algorithm][base_name] = data
+                
+                elif base_name in TIMESERIES_ATTRS:
+                    if algorithm not in self._timeseries_results:
+                        self._timeseries_results[algorithm] = {}
+                    self._timeseries_results[algorithm][base_name] = data
+                
+                elif base_name in CALCIUM_EVENTS_ATTRS:
+                    if algorithm not in self._calcium_events_results:
+                        self._calcium_events_results[algorithm] = {}
+                    self._calcium_events_results[algorithm][base_name] = data
+            else:
+                # Legacy files without algorithm suffix - store as private attribute
+                setattr(self, f'_{attr_name}', data)
+
+        # Keep the algorithm from config; do not override with loaded data
+        # (loaded data is stored correctly in _segmentation_results regardless)
+
+        self.n_spines = len(self.spines_data)
+        self._clear_cached_properties()
+        if hasattr(self._get_roi, 'cache_clear'):
+            self._get_roi.cache_clear()
+
+    def _extract_algorithm_from_attr(self, attr_name: str) -> str | None:
+        """
+        Extract algorithm name from attribute.
+        Useful for inferring which algorithm's results are stored
+        in a given attribute based on filename suffix.
+        
+        Parameters
+        ----------
+        attr_name : str
+            Attribute name (e.g., 'spines_data_deepd3').
+        
+        Returns
+        -------
+        str | None
+            Algorithm name if found, None otherwise.
+        
+        Example
+        -------
+        >>> self._extract_algorithm_from_attr('spines_data_deepd3')
+        'deepd3'
+        >>> self._extract_algorithm_from_attr('spines_data')
+        None
+        """
+        for algo in self.config.supported_algorithms:
+            if attr_name.endswith(f'_{algo}_care'):
+                return f'{algo}_care'
+            if attr_name.endswith(f'_{algo}'):
+                return algo
+        return None
+
+    def _clear_cached_properties(self) -> None:
+        """
+        Clear cached properties that depend on spines_data.
+        
+        This should be called whenever spines_data is modified
+        to ensure cached lookups reflect the current data.
+        """
+        # Remove cached property values to force recomputation
+        for prop_name in ['_spine_indices_by_roi',
+                          '_spines_by_branch',
+                          '_spines_by_branch_degree']:
+            if prop_name in self.__dict__:
+                delattr(self, prop_name)
+
+    def load_file(
+            self,
+            filepath: str | Path
+    ) -> tuple:
+        """
+        User-oriented method to load a single .h5 file and set it
+        as an instance attribute. This is a public method that allows
+        loading individual data files by pathname.
+        The attribute name is inferred from the filename.
+
+        Parameters
+        ----------
+        filepath : str | Path
+            Path to the .h5 file to load.
+
+        Returns
+        -------
+        tuple
+            Tuple containing (attribute_name, loaded_data).
+
+        Example
+        -------
+        >>> spine_dataset.load_file('path/to/spines_data.h5')
+        ('spines_data', [...])  # Returns attribute name and loaded data
+
+        >>> spine_dataset.load_file('path/to/custom_analysis.h5')
+        ('custom_analysis', [...])  # Custom files get stem as attribute name
+        """
+        attr_name, data = self.data_loader.load_file(filepath)
+        setattr(self, attr_name, data)
+        
+        return attr_name, data
 
     def collect_all_data(
             self,
             save: bool = True,
-            save_path: str or Path = None
+            save_path: str | Path = None,
+            segmentation_algorithm: str = None
     ) -> None:
         """
         Collect and process spine and dendrite segmentation data
@@ -229,6 +592,11 @@ class SpineDataset:
            for all segmented spines.
         3. Detects calcium events in spines using a trained neural
            network classifier.
+
+        Alternatively, users can run each step separately using the more specific
+        methods `collect_spines_and_dendrites_data()`, `collect_timeseries()`, and
+        `calcium_events_predictions()` if they want more control over the workflow
+        or want to run different algorithms for each step.
         
         Parameters
         ----------
@@ -262,22 +630,80 @@ class SpineDataset:
         """
 
         results = self.pipeline.run_pipeline(
+            spine_dataset=self,
             save=save,
-            save_path=save_path)
+            save_path=save_path,
+            segmentation_algorithm=segmentation_algorithm)
         
         for attr_name, data in results.items():
             setattr(self, attr_name, data)
         
         self.n_spines = len(getattr(self, 'spines_data', []))
+
+        # Invalidate cached properties since spines_data changed
+        self._clear_cached_properties()
+        if hasattr(self._get_roi, 'cache_clear'):
+            self._get_roi.cache_clear()
         
         # Store spine datasets for ROI access
         self._spine_datasets = self.pipeline.get_spine_datasets()
 
+    def apply_denoising(
+            self,
+            save: bool,
+            save_path: str | Path = None,
+            overwrite: bool = False
+    ) -> None:
+        """
+        Apply image denoising preprocessing before segmentation.
+
+        Currently uses CARE (Content-Aware Image Restoration) via CSBDeep.
+        Future versions may support additional denoising methods.
+
+        Parameters
+        ----------
+        save : bool, optional
+            Whether to save denoised images. Default is True.
+        save_path : str | Path, optional
+            Directory where result files will be saved.
+            If None, uses paths from data_loader mappings.
+        overwrite : bool, optional
+            Whether to overwrite existing denoised images.
+            Default is False.
+
+        Raises
+        ------
+        ValueError
+            If denoising is not enabled in configuration.
+
+        Notes
+        -----
+        - Saves denoised images as h5 file for programmatic access.
+        - Output path: processed/imaging/care_denoised_images.h5
+        - Temporary folders (padded inputs, CARE outputs) are deleted
+          after the h5 is written.
+        - Uses SpineAnalysisPipeline.run_denoising_pipeline() for
+          organized workflow execution.
+
+        Examples
+        --------
+        >>> spine_dataset.apply_denoising()
+        >>> spine_dataset.denoised_images  # access results
+        """
+        denoised = self.pipeline.run_denoising_pipeline(
+            spine_dataset=self,
+            save=save,
+            save_path=save_path,
+            overwrite=overwrite
+        )
+        self._care_denoised_images = denoised
+
     def collect_spines_and_dendrites_data(
             self,
             save: bool,
-            save_path: str or Path = None,
-    ) -> None:
+            save_path: str | Path = None,
+            segmentation_algorithm: str = None
+    ) -> list:
         """
         Collect and process spine and dendrite segmentation
         data for the entire dataset.
@@ -293,6 +719,12 @@ class SpineDataset:
         ----------
         save : bool
             Set to True to save data in .h5 format. Default is True.
+        save_path : str | Path, optional
+            Directory where result files will be saved.
+            If None, uses the dataset folder.
+        segmentation_algorithm : str, optional
+            Segmentation algorithm to use ('deepd3' or 'nnunet').
+            If None, uses value from config.
 
         Attributes Updated
         ------------------
@@ -308,39 +740,83 @@ class SpineDataset:
         Notes
         -----
         - Uses SpineAnalysisPipeline for organized segmentation workflow.
+        - Results are accessible via properties: spines_data, dendrites_data, etc.
         - Maintains backward compatibility by setting instance attributes.
         """
+
+        segmentation_algorithm = (
+            segmentation_algorithm if segmentation_algorithm is not None
+            else self.config.segmentation_algorithm
+        )
+
+        effective_algorithm = (
+            f"{segmentation_algorithm}_care"
+            if self.config.care_enabled
+            else segmentation_algorithm
+        )
+
+        # Auto-run denoising if enabled and not yet done
+        if self.config.care_enabled and self.denoised_images is None:
+            print("CARE denoising enabled — running apply_denoising() "
+                  "before segmentation...")
+            self.apply_denoising(save=True)
+
+        # Warn if overwriting existing results for this algorithm
+        if effective_algorithm in self._segmentation_results:
+            import warnings
+            warnings.warn(
+                f"Overwriting existing {effective_algorithm} results. "
+                f"Previous {effective_algorithm} data will be lost.",
+                UserWarning,
+                stacklevel=2
+            )
+
         # Run segmentation pipeline
         results = self.pipeline.run_segmentation_pipeline(
+            spine_dataset=self,
             save=save,
-            save_path=save_path
+            save_path=save_path,
+            algorithm=effective_algorithm
         )
+
+        # Store in algorithm-specific dictionary
+        self._segmentation_results[effective_algorithm] = results
+        self._current_algorithm = effective_algorithm
         
+        # Also set as private attributes for backward compatibility
         for attr_name, data in results.items():
-            setattr(self, attr_name, data)
-        
+            setattr(self, f'_{attr_name}', data)
+
         self.n_spines = len(self.spines_data)
         self._spine_datasets = self.pipeline.get_spine_datasets()
         
-        return self._spine_datasets
+        # Invalidate cached properties since spines_data changed
+        self._clear_cached_properties()
+        
+        print(f"Segmentation complete: {self.n_spines} spines detected across {len(self)} ROIs")
 
     def collect_timeseries(
             self,
             save: bool,
-            save_path: str or Path = None
+            save_path: str | Path = None,
+            segmentation_algorithm: str = None
     ) -> None:
         """
         Collect timeseries data (z-scores, dF/F, timestamps) for all spines.
-        This method processes the segmented spines to extract relevant
-        information, including z-scores, dF/F values, and timestamps.
+        This method processes the segmented spines obtained with either deepd3
+        or nnunet to extract relevant information, including z-scores,
+        dF/F values, and timestamps.
 
         Parameters
         ----------
         save : bool, optional
             Set to True to save data in .h5 format. Default is True.
-        save_path : str or Path, optional
+        save_path : str | Path, optional
             Directory where the .h5 files will be saved.
             If None, uses the dataset's parent folder.
+        segmentation_algorithm : str, optional
+            Algorithm's spine mask results to consider wherefrom getting timeseries.
+            If None, uses current algorithm.
 
         Raises
         ------
@@ -351,27 +827,45 @@ class SpineDataset:
         -----
         - Uses SpineAnalysisPipeline for organized timeseries collection.
         - Maintains backward compatibility by setting instance attributes.
+        - Timeseries are stored per algorithm to match spine segmentation.
         """
-        # Check dependencies
-        if not hasattr(self, 'spines_data') or not self.spines_data:
+        segmentation_algorithm = segmentation_algorithm if segmentation_algorithm is not None else self._current_algorithm
+        
+        # Fetch algorithm-specific data (not current algorithm's data)
+        if segmentation_algorithm not in self._segmentation_results:
             raise ValueError(
-                "Spine data required. "
-                "Run _collect_spines_and_dendrites_data() first.")
+                f"No segmentation results for algorithm '{segmentation_algorithm}'. "
+                f"Available: {list(self._segmentation_results.keys())}. "
+                f"Run collect_spines_and_dendrites_data(algorithm='{segmentation_algorithm}') first.")
+        
+        algo_results = self._segmentation_results[segmentation_algorithm]
+        spines_data = algo_results.get('spines_data', [])
+        dendrites_masks = algo_results.get('dendrites_masks', [])
+        
+        if not spines_data:
+            raise ValueError(
+                f"No spine data for algorithm '{segmentation_algorithm}'.")
 
         # Run timeseries pipeline
+        print(f"Collecting time series data for {segmentation_algorithm} spines...")
         results = self.pipeline.run_timeseries_pipeline(
-            spines_data=self.spines_data,
+            spines_data=spines_data,
+            dendrites_masks=dendrites_masks,
             save=save,
-            save_path=save_path
+            save_path=save_path,
+            algorithm=segmentation_algorithm
         )
         
-        for attr_name, data in results.items():
-            setattr(self, attr_name, data)
+        # Store in algorithm-specific dictionary
+        if segmentation_algorithm not in self._timeseries_results:
+            self._timeseries_results[segmentation_algorithm] = {}
+        self._timeseries_results[segmentation_algorithm].update(results)
 
     def calcium_events_predictions(
             self,
             save: bool,
-            save_path: str or Path = None
+            save_path: str | Path = None,
+            segmentation_algorithm: str = None
     ) -> None:
         """
         Detect calcium events in spines using a trained neural network
@@ -386,9 +880,12 @@ class SpineDataset:
         save : bool, optional
             Whether to save the calcium event data to .h5 files.
             Default is True.
-        save_path : str or Path, optional
+        save_path : str | Path, optional
             Directory where the .h5 files will be saved.
             If None, uses the dataset's parent folder.
+        segmentation_algorithm : str, optional
+            Algorithm to use for calcium event detection.
+            If None, uses current algorithm.
 
         Attributes Updated
         ------------------
@@ -401,29 +898,51 @@ class SpineDataset:
         -----
         - Uses SpineAnalysisPipeline for organized calcium event detection.
         - Maintains backward compatibility by setting instance attributes.
+        - Events are stored per algorithm to match timeseries data.
 
         Raises
         ------
         ValueError
             If time series data is not available.
         """
+        segmentation_algorithm = segmentation_algorithm if segmentation_algorithm is not None else self._current_algorithm
+        
+        # Fetch algorithm-specific timeseries data (not current algorithm's data)
+        if segmentation_algorithm not in self._timeseries_results:
+            raise ValueError(
+                f"No timeseries results for algorithm '{segmentation_algorithm}'. "
+                f"Available: {list(self._timeseries_results.keys())}. "
+                f"Run collect_timeseries(algorithm='{segmentation_algorithm}') first.")
+        
+        algo_timeseries = self._timeseries_results[segmentation_algorithm]
+        
         # Prepare timeseries data for pipeline
         timeseries_data = {
-            'zscores_BLA': getattr(self, 'zscores_BLA', []),
-            'dFF_BLA': getattr(self, 'dFF_BLA', []),
-            'zscores_CA3': getattr(self, 'zscores_CA3', []),
-            'dFF_CA3': getattr(self, 'dFF_CA3', [])
+            'zscores_BLA': algo_timeseries.get('zscores_BLA', []),
+            'dFF_BLA': algo_timeseries.get('dFF_BLA', []),
+            'zscores_CA3': algo_timeseries.get('zscores_CA3', []),
+            'dFF_CA3': algo_timeseries.get('dFF_CA3', [])
         }
         
+        # Validate data availability
+        if (len(timeseries_data['zscores_BLA']) == 0 and
+                len(timeseries_data['zscores_CA3']) == 0):
+            raise ValueError(
+                f"No timeseries data for algorithm '{segmentation_algorithm}'.")
+        
         # Run calcium events pipeline
+        print(f"Detecting calcium events for {segmentation_algorithm} spines...")
         results = self.pipeline.run_calcium_events_pipeline(
             timeseries_data=timeseries_data,
             save=save,
-            save_path=save_path
+            save_path=save_path,
+            algorithm=segmentation_algorithm
         )
         
-        for attr_name, data in results.items():
-            setattr(self, attr_name, data)
+        # Store in algorithm-specific dictionary
+        if segmentation_algorithm not in self._calcium_events_results:
+            self._calcium_events_results[segmentation_algorithm] = {}
+        self._calcium_events_results[segmentation_algorithm].update(results)
 
     @cached_property
     def _spine_indices_by_roi(self) -> dict:
@@ -585,7 +1104,7 @@ class SpineDataset:
 
     def _fetch_spine_data(
             self,
-            data_batch: list or np.ndarray,
+            data_batch: list | np.ndarray,
             spine_indices: list
     ) -> np.ndarray:
         """
@@ -594,7 +1113,7 @@ class SpineDataset:
 
         Parameters
         ----------
-        data_batch : list or np.ndarray
+        data_batch : list | np.ndarray
             Batch of spine-related data.
         spine_indices : list[int]
             List of indices corresponding to the spines of the given ROI.
@@ -655,6 +1174,17 @@ class SpineDataset:
         selected_calcium_events_CA3 = [
             prob for n, spine in enumerate(self.calcium_events_probabilities_CA3)
             for prob in spine if n in spine_indices]
+        
+        dendrites_masks = self.dendrites_masks
+        combined_spines_masks = self.combined_spines_masks
+        selected_dendrites_mask = (
+            dendrites_masks[roi_index]
+            if dendrites_masks and len(dendrites_masks) > roi_index else None
+        )
+        selected_combined_spines_mask = (
+            combined_spines_masks[roi_index]
+            if combined_spines_masks and len(combined_spines_masks) > roi_index else None
+        )
 
         selected_spines_data = [
             self.spines_data[i] for i in spine_indices]
@@ -671,6 +1201,16 @@ class SpineDataset:
             else None
         )
 
+        denoised_image = (
+            self.denoised_images[roi_index]
+            if self.config.care_enabled
+            and self.denoised_images is not None
+            and len(self.denoised_images) > roi_index
+            else None
+        )
+
+        algorithm = self._current_algorithm
+
         return RoiSpine(
                 roi_index,
                 roi_metadata,
@@ -686,7 +1226,11 @@ class SpineDataset:
                 selected_calcium_events_BLA,
                 selected_calcium_events_CA3,
                 spine_predictions,
-                dendrite_predictions)
+                dendrite_predictions,
+                selected_dendrites_mask,
+                selected_combined_spines_mask,
+                algorithm,
+                denoised_image)
 
     def __getitem__(self, roi_index: int) -> RoiSpine:
         if roi_index not in self._dataset.roi_list:
@@ -754,7 +1298,11 @@ class RoiSpine:
             calcium_events_BLA: list,
             calcium_events_CA3: list,
             spine_predictions: np.ndarray,
-            dendrite_predictions: np.ndarray
+            dendrite_predictions: np.ndarray,
+            dendrites_mask: np.ndarray,
+            combined_spines_mask: np.ndarray,
+            algorithm: str,
+            denoised_image: np.ndarray = None
     ) -> None:
         """
     Initialize the RoiSpine instance for a specific ROI.
@@ -846,6 +1394,10 @@ class RoiSpine:
 
         self.spine_predictions = spine_predictions
         self.dendrite_predictions = dendrite_predictions
+        self.dendrites_mask = dendrites_mask
+        self.combined_spines_mask = combined_spines_mask
+
+        self.algorithm = algorithm
 
         for key, value in self.roi_metadata.items():
             setattr(self, key, value)
@@ -853,9 +1405,16 @@ class RoiSpine:
         for key, value in params.items():
             setattr(self, key, value)
 
-        self.base_image = self.get_base_image()
+        self.base_image = (
+            denoised_image if denoised_image is not None else self.get_base_image()
+        )
+        self.processed_image = self.get_base_image()  # Placeholder for future processing steps
+        self.denoised_image = denoised_image
 
-        self.n_spines = len(self.spines_data)
+    @property
+    def n_spines(self) -> int:
+        """Number of spines segmented within the ROI."""
+        return len(self.spines_data) if self.spines_data is not None else 0
 
     def get_base_image(self) -> np.ndarray:
         """
@@ -1018,13 +1577,37 @@ class Spine:
     def f(
             self,
             sweep_index: int,
-            rolling_bsl: str = 'centered',
-            window_sec: float = 0.5,
-            min_quantile: int = 10,
+            rolling_bsl: str = None,
+            window_sec: float = None,
+            min_quantile: int = None,
     ) -> np.ndarray:
         """
         Calculate the dF/F (delta F over F) for a specific spine.
+        
+        Parameters
+        ----------
+        sweep_index : int
+            Index of the sweep to calculate dF/F for.
+        rolling_bsl : str, optional
+            Rolling baseline method ('centered', 'left', 'right').
+            If None, uses value from config.
+        window_sec : float, optional
+            Window size in seconds for rolling baseline calculation.
+            If None, uses value from config.
+        min_quantile : int, optional
+            Minimum quantile for baseline calculation.
+            If None, uses value from config.
+        
+        Returns
+        -------
+        np.ndarray
+            dF/F trace for the specified sweep.
         """
+        # Use config defaults if not provided
+        rolling_bsl = rolling_bsl if rolling_bsl is not None else self.rolling_bsl
+        window_sec = window_sec if window_sec is not None else self.window_sec
+        min_quantile = min_quantile if min_quantile is not None else self.min_quantile
+        
         dff_tensor = dFF(
             n_frames=self.n_frames,
             roi=self.roi,

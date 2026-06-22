@@ -18,17 +18,35 @@ class DataPaths:
     and analysis results.
     """
     
+    # Segmentation results (base paths — no algorithm suffix)
     SPINES_DATA = Path(r'processed/spines/spines_data.h5')
+    DENDRITES_DATA = Path(r'processed/spines/dendrites_data.h5')
     SPINE_PREDICTIONS = Path(r'processed/spines/spine_predictions.h5')
     DENDRITE_PREDICTIONS = Path(r'processed/spines/dendrite_predictions.h5')
-    ZSCORES_CA3 = Path(r'processed/spines/zscores_CA3.h5')
-    DFF_CA3 = Path(r'processed/spines/dFF_CA3.h5')
-    TS_CA3 = Path(r'processed/spines/ts_CA3.h5')
-    ZSCORES_BLA = Path(r'processed/spines/zscores_BLA.h5')
-    DFF_BLA = Path(r'processed/spines/dFF_BLA.h5')
-    TS_BLA = Path(r'processed/spines/ts_BLA.h5')
-    CALCIUM_EVENTS_BLA = Path(r'analysis/spines/calcium_event_probabilities_BLA.h5')
-    CALCIUM_EVENTS_CA3 = Path(r'analysis/spines/calcium_event_probabilities_CA3.h5')
+    SPINE_MASKS = Path(r'processed/spines/spine_masks.h5')
+    DENDRITE_MASKS = Path(r'processed/spines/dendrite_masks.h5')
+
+    # Imaging / folder paths
+    PADDED_IMAGES_FOLDER = Path(r'processed/imaging/padded_images')
+    CARE_DENOISED_IMAGES = Path(r'processed/imaging/care_denoised_images.h5')
+    NNUNET_SPINE_PROBABILITY_FOLDER = Path(r'processed/spines/nnunet')
+    NNUNET_DENDRITE_PROBABILITY_FOLDER = Path(r'processed/spines/nnunet')
+    DEEPD3_SPINE_PROBABILITY_FOLDER = Path(r'processed/spines/deepd3')
+    DEEPD3_DENDRITE_PROBABILITY_FOLDER = Path(r'processed/spines/deepd3')
+
+    # Timeseries data (base paths — no algorithm suffix)
+    ZSCORES_CA3 = Path(r'processed/imaging/zscores_CA3.h5')
+    DFF_CA3 = Path(r'processed/imaging/dFF_CA3.h5')
+    TS_CA3 = Path(r'processed/imaging/ts_CA3.h5')
+    ZSCORES_BLA = Path(r'processed/imaging/zscores_BLA.h5')
+    DFF_BLA = Path(r'processed/imaging/dFF_BLA.h5')
+    TS_BLA = Path(r'processed/imaging/ts_BLA.h5')
+
+    # Calcium events (base paths — no algorithm suffix)
+    CALCIUM_EVENTS_BLA = Path(
+        r'analysis/spines/calcium_event_probabilities_BLA.h5')
+    CALCIUM_EVENTS_CA3 = Path(
+        r'analysis/spines/calcium_event_probabilities_CA3.h5')
 
 
 class SpineDataLoader:
@@ -45,14 +63,14 @@ class SpineDataLoader:
     
     def __init__(
             self,
-            base_path: str or Path
+            base_path: str | Path
     ) -> None:
         """
         Initialize data loader.
         
         Parameters
         ----------
-        base_path : str or Path
+        base_path : str | Path
             Base directory path for data files.
         """
         self.base_path = Path(base_path)
@@ -67,30 +85,91 @@ class SpineDataLoader:
         dict
             Dictionary mapping attribute names to file paths.
         """
-        return {
-            'spines_data': DataPaths.SPINES_DATA,
-            'spine_predictions': DataPaths.SPINE_PREDICTIONS,
-            'dendrite_predictions': DataPaths.DENDRITE_PREDICTIONS,
-            'zscores_CA3': DataPaths.ZSCORES_CA3,
-            'dFF_CA3': DataPaths.DFF_CA3,
-            'ts_CA3': DataPaths.TS_CA3,
-            'zscores_BLA': DataPaths.ZSCORES_BLA,
-            'dFF_BLA': DataPaths.DFF_BLA,
-            'ts_BLA': DataPaths.TS_BLA,
-            'calcium_events_probabilities_BLA': DataPaths.CALCIUM_EVENTS_BLA,
-            'calcium_events_probabilities_CA3': DataPaths.CALCIUM_EVENTS_CA3,
+        b = self.base_path
+        mapping = {
+            # Base segmentation paths (no algorithm or denoising suffix)
+            'spines_data': b / DataPaths.SPINES_DATA,
+            'dendrites_data': b / DataPaths.DENDRITES_DATA,
+            'spine_predictions': b / DataPaths.SPINE_PREDICTIONS,
+            'dendrite_predictions': b / DataPaths.DENDRITE_PREDICTIONS,
+            'spine_masks': b / DataPaths.SPINE_MASKS,
+            'dendrites_masks': b / DataPaths.DENDRITE_MASKS,
+            'combined_spines_masks': b / DataPaths.SPINE_MASKS,
+
+            # Folders and special files (never receive variant suffixes)
+            'padded_images_folder': b / DataPaths.PADDED_IMAGES_FOLDER,
+            'care_denoised_images': b / DataPaths.CARE_DENOISED_IMAGES,
+            'deepd3_probability_folder': b / DataPaths.DEEPD3_SPINE_PROBABILITY_FOLDER,
+            'deepd3_prediction_folder': b / DataPaths.DEEPD3_SPINE_PROBABILITY_FOLDER,
+            'nnunet_probability_folder': b / DataPaths.NNUNET_SPINE_PROBABILITY_FOLDER,
+            'nnunet_prediction_folder': b / DataPaths.NNUNET_SPINE_PROBABILITY_FOLDER,
+
+            # Base timeseries (no algorithm suffix, legacy)
+            'zscores_CA3': b / DataPaths.ZSCORES_CA3,
+            'dFF_CA3': b / DataPaths.DFF_CA3,
+            'ts_CA3': b / DataPaths.TS_CA3,
+            'zscores_BLA': b / DataPaths.ZSCORES_BLA,
+            'dFF_BLA': b / DataPaths.DFF_BLA,
+            'ts_BLA': b / DataPaths.TS_BLA,
+
+            # Base calcium events (no algorithm suffix, legacy)
+            'calcium_events_probabilities_BLA': b / DataPaths.CALCIUM_EVENTS_BLA,
+            'calcium_events_probabilities_CA3': b / DataPaths.CALCIUM_EVENTS_CA3,
         }
-    
+
+        # Keys that should never receive algorithm or denoising suffixes.
+        _fixed_keys = {
+            'combined_spines_masks', 'care_denoised_images',
+            'padded_images_folder',
+            'deepd3_probability_folder', 'deepd3_prediction_folder',
+            'nnunet_probability_folder', 'nnunet_prediction_folder',
+        }
+
+        # Supported segmentation algorithms. To add a new one (e.g. cellpose),
+        # append its suffix here.
+        supported_algo_suffixes = ('_deepd3', '_nnunet')
+
+        # Active denoising backends. To add a new one (e.g. Noise2Void),
+        # append its suffix here.
+        active_denoise_suffixes = ('_care',)
+
+        # Step 1 — generate algorithm-specific variants from base .h5 paths.
+        for algo_suffix in supported_algo_suffixes:
+            algo_variants = {
+                f"{key}{algo_suffix}": (
+                    path.parent / f"{path.stem}{algo_suffix}{path.suffix}"
+                )
+                for key, path in list(mapping.items())
+                if path.suffix == '.h5'
+                and key not in _fixed_keys
+            }
+            mapping.update(algo_variants)
+
+        # Step 2 — generate denoising variants from algorithm-specific paths.
+        for denoise_suffix in active_denoise_suffixes:
+            denoised_variants = {
+                f"{key}{denoise_suffix}": (
+                    path.parent / f"{path.stem}{denoise_suffix}{path.suffix}"
+                )
+                for key, path in list(mapping.items())
+                if path.suffix == '.h5'
+                and any(key.endswith(s) for s in supported_algo_suffixes)
+                and not any(key.endswith(d) for d in active_denoise_suffixes)
+            }
+            mapping.update(denoised_variants)
+
+        return mapping
+
     def load_file(
         self,
-        filepath: str or Path,
+        filepath: str | Path,
     ) -> tuple:
         """
         Load a single .h5 file and return attribute name and data.
         
         Parameters
         ----------
-        filepath : str or Path
+        filepath : str | Path
             Path to the .h5 file to load.
             
         Returns
@@ -165,13 +244,12 @@ class SpineDataLoader:
             Dictionary mapping attribute names to loaded data.
         """
         if file_paths is None:
-            
-            file_paths = []
-            
-            for attr, relative_path in self._files_mapping.items():
-                full_path = self.base_path / relative_path
-                if full_path.exists():
-                    file_paths.append(full_path)
+
+            file_paths = [
+                full_path
+                for full_path in self._files_mapping.values()
+                if full_path.exists() and full_path.is_file()
+            ]
         
         loaded_data = {}
         
@@ -194,7 +272,7 @@ class SpineDataLoader:
     def save_file(
         self,
         data: any,
-        output_path: str or Path,
+        output_path: str | Path,
     ) -> None:
         """
         Save data to an .h5 file.
@@ -203,7 +281,7 @@ class SpineDataLoader:
         ----------
         data : Any
             Data to save.
-        output_path : str or Path
+        output_path : str | Path
             Name of the file will be saved.
             
         Raises
@@ -235,7 +313,7 @@ class SpineDataLoader:
     def save_multiple_files(
         self,
         data_dict: dict,
-        output_path: str or Path,
+        output_path: str | Path,
         filename_mapping: dict = None
     ) -> None:
         """
@@ -245,15 +323,16 @@ class SpineDataLoader:
         ----------
         data_dict : dict
             Dictionary mapping attribute names to data.
-        output_path : str or Path
-            Directory where files will be saved.
+        output_path : str | Path
+            Base directory where files will be saved.
         filename_mapping : dict, optional
-            Mapping from attribute names to filenames.
-            If None, uses default mapping.
+            Mapping from attribute names to relative file paths.
+            If None, uses default mapping with full relative paths.
         """
         if filename_mapping is None:
+            # Use full relative paths from _files_mapping
             filename_mapping = {
-                attr: Path(path).name 
+                attr: path 
                 for attr, path in self._files_mapping.items()
             }
         
@@ -261,8 +340,13 @@ class SpineDataLoader:
         
         for attr_name, data in data_dict.items():
             if attr_name in filename_mapping:
-                filename = filename_mapping[attr_name]
-                self.save_file(data, output_path, filename)
+                relative_path = Path(filename_mapping[attr_name])
+                full_path = output_path / relative_path
+                
+                # Create parent directories if needed
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                self.save_file(data, full_path)
     
     def get_existing_files(self) -> dict:
         """
@@ -273,14 +357,11 @@ class SpineDataLoader:
         dict
             Dictionary mapping attribute names to existing file paths.
         """
-        existing = {}
-        
-        for attr, relative_path in self._files_mapping.items():
-            full_path = self.base_path / relative_path
-            if full_path.exists():
-                existing[attr] = full_path
-        
-        return existing
+        return {
+            attr: full_path
+            for attr, full_path in self._files_mapping.items()
+            if full_path.exists()
+        }
     
     def get_missing_files(self) -> dict:
         """
@@ -291,11 +372,8 @@ class SpineDataLoader:
         dict
             Dictionary mapping attribute names to expected file paths.
         """
-        missing = {}
-        
-        for attr, relative_path in self._files_mapping.items():
-            full_path = self.base_path / relative_path
-            if not full_path.exists():
-                missing[attr] = full_path
-        
-        return missing
+        return {
+            attr: full_path
+            for attr, full_path in self._files_mapping.items()
+            if not full_path.exists()
+        }

@@ -17,7 +17,7 @@ def to_dataframe(
     spine_dataset: SpineDataset,
     calcium_events_binary_BLA: np.ndarray,
     calcium_events_binary_CA3: np.ndarray,
-    n_events_threshold: int = 1,
+    n_events_threshold: int = 2,
 ) -> pd.DataFrame:
     """
     Convert spine data from a SpineDataset into a pandas DataFrame.
@@ -30,7 +30,7 @@ def to_dataframe(
     calcium_events_binary_CA3 : np.ndarray
         Binary array indicating predicted calcium events for CA3 spines.
     n_events_threshold : int, optional
-        Minimum number of events to consider a spine as active (default is 1).
+        Minimum number of events to consider (>=) a spine as active (default is 2).
 
     Returns
     -------
@@ -96,9 +96,11 @@ def spines_to_dataframe(
 
     df = add_nearest_neighbor_distance_column(df, "BLA", nodes_list)
     df = add_consecutive_neighbor_distance_column(df, "BLA", nodes_list)
+    df = add_cross_nearest_neighbor_distance_column(df, "BLA", nodes_list)
 
     df = add_nearest_neighbor_distance_column(df, "CA3", nodes_list)
     df = add_consecutive_neighbor_distance_column(df, "CA3", nodes_list)
+    df = add_cross_nearest_neighbor_distance_column(df, "CA3", nodes_list)
 
     return df
 
@@ -168,7 +170,7 @@ def add_spine_active_column(
         dataframe: pd.DataFrame,
         prediction_binary: np.ndarray,
         input_identity: str,
-        n_events_threshold: int = 1
+        n_events_threshold: int
 
 ) -> pd.DataFrame:
     """
@@ -184,8 +186,8 @@ def add_spine_active_column(
         Binary array indicating predicted calcium events for each spine.
     input_identity : str
         Identifier for the type of input ('BLA' or 'CA3').
-    n_events_threshold : int, optional
-        Minimum number of events to consider a spine as active (default is 1).
+    n_events_threshold : int
+        Minimum number of events to consider a spine as active.
 
     Returns:
     -------
@@ -216,7 +218,7 @@ def add_spine_active_column(
         raise ValueError("n_events_threshold must be a positive integer.")
 
     event_counts = prediction_binary.sum(axis=1)
-    is_active = event_counts > n_events_threshold
+    is_active = event_counts >= n_events_threshold
     dataframe[f'is_{input_identity}'] = is_active
 
     return dataframe
@@ -307,6 +309,16 @@ def add_nearest_neighbor_distance_column(
     Uses `distance_along_neurite()` function to compute distances.
     """
 
+    if not isinstance(dataframe, pd.DataFrame):
+        raise ValueError("dataframe must be a pandas DataFrame.")
+
+    if input_identity not in ["BLA", "CA3"]:
+        raise ValueError("input_identity must be either 'BLA' or 'CA3'.")
+
+    if f'is_{input_identity}' not in dataframe.columns:
+        raise ValueError(f"DataFrame must contain 'is_{input_identity}' column.")
+    
+    dataframe = dataframe.copy()
     node_map, paths_to_root = prepare_neurite_distance_tools(nodes_list)
 
     # Initialize the column with NaN values
@@ -318,6 +330,7 @@ def add_nearest_neighbor_distance_column(
     grouped = dataframe_by_input.groupby('branch_id')
 
     for _, branch_df in grouped:
+        
         spine_indices = branch_df.index.to_list()
         node_ids = branch_df['closest_node_id'].to_list()
         n = len(spine_indices)
@@ -433,6 +446,7 @@ def add_consecutive_neighbor_distance_column(
     Uses `distance_along_neurite()` function to compute distances.
     """
 
+    dataframe = dataframe.copy()
     node_map, paths_to_root = prepare_neurite_distance_tools(nodes_list)
 
     # Initialize the column with NaN values
@@ -478,6 +492,170 @@ def add_consecutive_neighbor_distance_column(
             dataframe.loc[
                 idx,
                 f'consecutive_neighbor_distance_{input_identity}'
+            ] = min_dist if min_dist != np.inf else np.nan
+
+    return dataframe
+
+
+def add_cross_nearest_neighbor_distance_column(
+        dataframe: pd.DataFrame,
+        input_identity: str,
+        nodes_list: list
+) -> pd.DataFrame:
+    """
+    Add a Cross-Nearest-Neighbor Distance (CNND) column to the DataFrame,
+    calculating the distance from spines of one identity to the nearest
+    spine of the opposite identity on the same branch.
+
+    Parameters:
+    ----------
+    dataframe : pd.DataFrame
+        DataFrame containing spine information with identity columns.
+    input_identity : str
+        Identifier for the type of input ('BLA' or 'CA3').
+    nodes_list : list
+        List of nodes representing the neurite structure
+        for distance calculations.
+
+    Returns:
+    -------
+    pd.DataFrame
+        DataFrame with an added 'cross_nearest_neighbor_distance' column.
+
+    Raises:
+    ------
+    ValueError
+        If input parameters are of incorrect types or values.
+
+    Notes:
+    -----
+    The 'input_identity' parameter must be either 'BLA' or 'CA3'.
+    For BLA spines, calculates distance to nearest CA3 spine.
+    For CA3 spines, calculates distance to nearest BLA spine.
+    Uses `distance_along_neurite()` function to compute distances.
+    """
+    if not isinstance(dataframe, pd.DataFrame):
+        raise ValueError("dataframe must be a pandas DataFrame.")
+
+    if input_identity not in ["BLA", "CA3"]:
+        raise ValueError("input_identity must be either 'BLA' or 'CA3'.")
+
+    # Determine opposite identity
+    opposite_identity = "CA3" if input_identity == "BLA" else "BLA"
+
+    # Check required columns exist
+    required_columns = [f'is_{input_identity}', f'is_{opposite_identity}']
+    for col in required_columns:
+        if col not in dataframe.columns:
+            raise ValueError(f"DataFrame must contain '{col}' column.")
+
+    dataframe = dataframe.copy()
+    node_map, paths_to_root = prepare_neurite_distance_tools(nodes_list)
+
+    # Initialize the column with NaN values
+    dataframe[f"cross_nearest_neighbor_distance_{input_identity}"] = np.nan
+
+    # Get spines of the target identity
+    target_spines = dataframe[dataframe[f'is_{input_identity}'] == True]
+
+    # Group target spines by branch_id
+    grouped = target_spines.groupby('branch_id')
+
+    for branch_id, branch_df in grouped:
+        # Get spines of opposite identity on this branch from the full DataFrame
+        # Exclude spines that have BOTH identities to avoid self-matching
+        opposite_spines_branch = dataframe[
+            (dataframe['branch_id'] == branch_id) &
+            (dataframe[f'is_{opposite_identity}'] == True)
+        ]
+
+        # Skip if no spines of opposite identity on this branch
+        if len(opposite_spines_branch) == 0:
+            continue
+
+        target_indices = branch_df.index.to_list()
+        target_node_ids = branch_df['closest_node_id'].to_list()
+        opposite_indices = opposite_spines_branch.index.to_list()
+        opposite_node_ids = opposite_spines_branch['closest_node_id'].to_list()
+
+        # For each target spine, find distance to nearest opposite spine
+        for i, target_idx in enumerate(target_indices):
+            min_dist = np.inf
+            for j, opposite_node_id in enumerate(opposite_node_ids):
+                # Skip if it's the same spine (can happen if spine has both identities)
+                if target_idx == opposite_indices[j]:
+                    continue
+                d = distance_along_neurite(
+                    node_map, paths_to_root,
+                    target_node_ids[i], opposite_node_id)
+                if d >= 0 and d < min_dist:
+                    min_dist = d
+            dataframe.loc[
+                target_idx,
+                f'cross_nearest_neighbor_distance_{input_identity}'
+            ] = min_dist if min_dist != np.inf else np.nan
+
+    return dataframe
+
+
+def add_cross_nearest_neighbor_distance_column_fast(
+        dataframe: pd.DataFrame,
+        input_identity: str,
+        node_map: dict,
+        paths_to_root: dict
+) -> pd.DataFrame:
+    """
+    Add a 'cross_nearest_neighbor_distance' column using precomputed node_map and paths_to_root.
+    For each spine of input_identity, finds the nearest spine of the OPPOSITE identity.
+    
+    Args:
+        dataframe: DataFrame with spine data
+        input_identity: "BLA" or "CA3" - the identity to calculate distances FOR
+        node_map: Precomputed node mapping
+        paths_to_root: Precomputed paths to root
+        
+    Returns:
+        DataFrame with added cross_nearest_neighbor_distance column
+    """
+    dataframe = dataframe.copy()
+    dataframe[f"cross_nearest_neighbor_distance_{input_identity}"] = np.nan
+
+    # Get spines of the input identity
+    dataframe_input = dataframe[dataframe[f'is_{input_identity}'] == True]
+
+    # Get spines of the opposite identity
+    opposite_identity = "CA3" if input_identity == "BLA" else "BLA"
+    dataframe_opposite = dataframe[dataframe[f'is_{opposite_identity}'] == True]
+
+    # Group by branch
+    for branch_id in dataframe_input['branch_id'].unique():
+        # Get input spines on this branch
+        input_branch_df = dataframe_input[dataframe_input['branch_id'] == branch_id]
+        input_indices = input_branch_df.index.to_list()
+        input_node_ids = input_branch_df['closest_node_id'].to_list()
+
+        # Get opposite spines on this branch
+        opposite_branch_df = dataframe_opposite[dataframe_opposite['branch_id'] == branch_id]
+        opposite_indices = opposite_branch_df.index.to_list()
+        opposite_node_ids = opposite_branch_df['closest_node_id'].to_list()
+
+        # If no opposite spines on this branch, distances remain NaN
+        if len(opposite_indices) == 0:
+            continue
+
+        # For each input spine, find nearest opposite spine
+        for i, idx in enumerate(input_indices):
+            min_dist = np.inf
+            for j in range(len(opposite_indices)):
+                # Skip if it's the same spine (can happen if spine has both identities)
+                if idx == opposite_indices[j]:
+                    continue
+                d = distance_along_neurite(node_map, paths_to_root, input_node_ids[i], opposite_node_ids[j])
+                if d >= 0 and d < min_dist:
+                    min_dist = d
+            dataframe.loc[
+                idx,
+                f'cross_nearest_neighbor_distance_{input_identity}'
             ] = min_dist if min_dist != np.inf else np.nan
 
     return dataframe
