@@ -198,6 +198,26 @@ def distance_along_neurite(
         node_id1: int,
         node_id2: int
 ) -> float:
+    """
+    Compute the distance along the neurite between two nodes using
+    precomputed paths to root.
+    
+    Parameters
+    ----------
+    node_map : dict
+        A mapping from node id to node object with .x, .y, .z, .parent_id attributes.
+    paths_to_root : dict
+        A mapping from node id to its path to root (list of node ids).
+    node_id1 : int
+        The id of the first node.
+    node_id2 : int
+        The id of the second node.
+    
+    Returns
+    -------
+    float
+        The distance along the neurite between the two nodes.
+    """
 
     path1 = paths_to_root[node_id1]
     path2 = paths_to_root[node_id2]
@@ -255,7 +275,7 @@ def find_root(
         if nodes_list[parent_id - 1].type == "soma":
             return node.id - 1  # Return current node (first dendritic node from soma)
     
-    # Fallback
+    # Fallback soma
     return 0
 
 

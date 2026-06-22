@@ -41,10 +41,7 @@ def detect_calcium_events(
     # assert zscores.shape == dFF.shape, \
     #     "Z-scores and dFF traces must have the same shape."
 
-    try:
-        model = cec.load_classifier(model_path)
-    except KeyError:
-        model = cec.load_classifier_dff(model_path)
+    model = cec.load_classifier_dff(model_path)
     
     device = cec.set_device()
     model.to(device)

@@ -1,17 +1,20 @@
-from tqdm import tqdm
-from pathlib import Path
-import numpy as np
-import torch
+from __future__ import annotations
 
-from spyne.core.spines.analysis.timeseries.timeseries import dFF, get_timestamps, z_score
+from tqdm import tqdm
+import numpy as np
+from spyne.core.spines.analysis.timeseries.timeseries import (
+    background, dFF, get_timestamps, z_score)
 
 
 def collect_timeseries(
     dataset,
     spines_data: list,
     metadata: dict,
+    dendrites_masks: list,
+    background_dilation_disk_size: int,
+    neuropil_factor: float,
+    baseline_percentile: float,
     device: str,
-    output_folder: str or Path,
 ) -> tuple:
     """
     Collect and process timeseries data for all spines.
@@ -24,10 +27,23 @@ def collect_timeseries(
         Processed spine data from semantic segmentation.
     metadata : dict
         ROI metadata dictionary containing frame rates, ADC lists, etc.
+    dendrites_masks : list
+        Per-ROI dendrite masks, indexed by roi_n. Produced by
+        ``collect_spines_and_dendrites_data()``.
+    background_dilation_disk_size : int
+        Disk radius (pixels) used to dilate the combined spine+dendrite
+        mask when computing the background region.
+    neuropil_factor : float
+        Fraction of background signal to subtract (neuropil contamination
+        coefficient). 0.7 is the commonly used default.
+    baseline_percentile : float
+        Percentile threshold (0–100) used by :func:`z_score` to select
+        baseline frames. Frames at or below this percentile are used to
+        estimate mean and std, making the z-score robust to large
+        calcium transients.
     device : str
         Device to perform calculations ('/GPU:0' or '/CPU:0').
-    output_folder : str or Path
-        Folder to save the collected timeseries data.
+    
 
     Returns
     -------
@@ -40,7 +56,6 @@ def collect_timeseries(
         - `dFF_BLA` : np.ndarray
         - `ts_BLA` : np.ndarray
     """
-    output_folder = Path(output_folder)
     total_spines = len(spines_data)
 
     if total_spines == 0:
@@ -77,7 +92,33 @@ def collect_timeseries(
     dFF_BLA.fill(np.nan)
     ts_BLA.fill(np.nan)
 
+    # Pre-compute background once per (roi_n, sweep_index), combining all
+    # spine masks belonging to that ROI so the excluded region is complete.
+    roi_spine_masks: dict[int, np.ndarray] = {}
+    for spine_data in spines_data:
+        roi_n = spine_data['roi_n']
+        mask = spine_data['mask']
+        if roi_n not in roi_spine_masks:
+            roi_spine_masks[roi_n] = np.zeros_like(mask, dtype=bool)
+        roi_spine_masks[roi_n] |= mask > 0
+
+    bg_cache: dict[tuple[int, int], object] = {}
+    for roi_n, combined_spine_mask in roi_spine_masks.items():
+        roi_meta = metadata[roi_n]
+        roi_data = dataset[roi_n]
+        
+        for sweep_index in range(roi_meta['n_sweeps']):
+            bg_cache[(roi_n, sweep_index)] = background(
+                n_frames=roi_meta['n_frames'],
+                roi=roi_data,
+                spine_mask=combined_spine_mask,
+                dendrite_mask=dendrites_masks[roi_n],
+                sweep_index=sweep_index,
+                dilation_disk_size=background_dilation_disk_size,
+            )
+
     with tqdm(total=total_spines, desc="Collecting timeseries") as pbar:
+        
         for global_spine_index, spine_data in enumerate(spines_data):
             roi_n = spine_data['roi_n']
             roi_meta = metadata[roi_n]
@@ -91,16 +132,13 @@ def collect_timeseries(
             index_BLA = 0
 
             for sweep_index in range(roi_meta['n_sweeps']):
+                
                 adc_value = roi_meta['adc_list'][sweep_index]
+                
+                # Get background from cache
+                bg = bg_cache[(roi_n, sweep_index)]
 
                 # Calculate timeseries using core functions directly
-                z_tensor = z_score(
-                    n_frames=n_frames,
-                    roi=roi_data,
-                    mask=spine_mask,
-                    frame_rate=frame_rate,
-                    sweep_index=sweep_index
-                )
                 dff_tensor = dFF(
                     n_frames=n_frames,
                     roi=roi_data,
@@ -109,23 +147,25 @@ def collect_timeseries(
                     sweep_index=sweep_index,
                     rolling_bsl='centered',
                     window_sec=0.5,
-                    min_quantile=10
+                    min_quantile=10,
+                    background_signal=bg,
+                    neuropil_factor=neuropil_factor,
                 )
+                
+                z_tensor = z_score(
+                    dff_signal=dff_tensor,
+                    baseline_percentile=baseline_percentile,
+                )
+                
                 ts_tensor = get_timestamps(
                     n_frames=n_frames,
                     frame_rate=frame_rate
                 )
 
-                # Move tensors to device if needed
-                if device == 'cuda' or device == 'cuda:0':
-                    z_tensor = z_tensor.to('cuda')
-                    dff_tensor = dff_tensor.to('cuda')
-                    ts_tensor = ts_tensor.to('cuda')
-
                 # Convert to numpy
-                z_score_np = z_tensor.cpu().numpy()
-                dff_value_np = dff_tensor.cpu().numpy()
-                timestamp_np = ts_tensor.cpu().numpy()
+                z_score_np = z_tensor.numpy()
+                dff_value_np = dff_tensor.numpy()
+                timestamp_np = ts_tensor.numpy()
 
                 if adc_value == 'IN 3':
                     zscores_CA3[global_spine_index, index_CA3, :] = z_score_np
