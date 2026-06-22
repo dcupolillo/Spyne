@@ -2,6 +2,7 @@
     @author: dcupolillo """
 
 from __future__ import annotations
+
 from pathlib import Path
 from typing import Union
 import numpy as np
@@ -9,6 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from functools import cache
 import ROIpy as rp
+
 from spyne.core.imaging.visualization import (
     animate_frames, save_frames, save_single_frame)
 from spyne.core.imaging.load import create_file_to_roi_map
@@ -50,10 +52,11 @@ class ImagingDataset:
 
     def __init__(
             self,
-            folder: str or Path,
-            config_path: str or Path = None,
+            folder: str | Path,
+            config_path: str | Path = None,
             kernel_size_um: tuple = None,
             pmt_artifact_detection_threshold: int = None,
+            _force_recompute: bool = False,
             **config_overrides
     ) -> None:
         """
@@ -61,7 +64,7 @@ class ImagingDataset:
 
         Parameters
         ----------
-        folder : str or Path
+        folder : str | Path
             Path to the main folder containing imaging data.
             Requires a folder structure like:
             └─ date (YYMMDD, e.g. 250101)
@@ -78,7 +81,7 @@ class ImagingDataset:
                   │  ├─ morphology
                   │  └─ spines
                   └─ analysis
-        config_path : str or Path, optional
+        config_path : str | Path, optional
             Path to configuration file. If provided, other config parameters are ignored.
         kernel_size_um : tuple, optional
             Size of the 3D median filter kernel as
@@ -104,6 +107,7 @@ class ImagingDataset:
         """
         
         self.folder = Path(folder)
+        self._force_recompute = _force_recompute
         
         # Initialize configuration
         self.config = ImagingDatasetConfig(
@@ -112,6 +116,11 @@ class ImagingDataset:
             pmt_artifact_detection_threshold=pmt_artifact_detection_threshold,
             **config_overrides
         )
+        
+        # Expose config parameters as attributes for backward compatibility
+        self.median_filter_kernel_size_um = self.config.kernel_size_um
+        self.pmt_artifact_detection_threshold = (
+            self.config.pmt_artifact_detection_threshold)
         
         # Initialize data loader
         self.data_loader = ImagingDataLoader(self.folder)
@@ -142,7 +151,7 @@ class ImagingDataset:
 
     def load_metadata(
         self,
-        filename: str or Path = None
+        filename: str | Path = None
     ) -> None:
         """
         Public method to load imaging metadata with different parameters.
@@ -150,7 +159,7 @@ class ImagingDataset:
 
         Parameters
         ----------
-        filename : str or Path, optional
+        filename : str | Path, optional
             Filename to load metadata from. If None, loads from default location.
 
         Returns
@@ -161,7 +170,7 @@ class ImagingDataset:
 
     def _load_metadata(
         self,
-        metadata_filename: str or Path = None
+        metadata_filename: str | Path = None
     ) -> list:
         """
         Private method to load metadata for all ROIs.
@@ -176,7 +185,8 @@ class ImagingDataset:
         """
         
         metadata, n_rois, roi_list = self.data_loader.load_metadata(
-            self, filepath=metadata_filename)
+            self, filepath=metadata_filename,
+            force_recompute=self._force_recompute)
         
         self.n_rois = n_rois
         self.roi_list = roi_list
@@ -185,7 +195,7 @@ class ImagingDataset:
 
     def load_data(
             self,
-            filename: str or Path = None,
+            filename: str | Path = None,
     ) -> None:
         """
         Public method to reload imaging data with different parameters.
@@ -196,7 +206,7 @@ class ImagingDataset:
 
         Parameters
         ----------
-        filename : str or Path, optional
+        filename : str | Path, optional
             Filename to load processed data from. If None, loads from default location.
 
         Returns
@@ -207,7 +217,7 @@ class ImagingDataset:
 
     def _load_data(
         self,
-        processed_data_filename: str or Path = None
+        processed_data_filename: str | Path = None
     ) -> list:
         """
         Private method to load and process imaging data.
@@ -226,7 +236,9 @@ class ImagingDataset:
             A list of processed imaging data arrays.
         """
         
-        return self.data_loader.load_imaging_data(self, filepath=processed_data_filename)
+        return self.data_loader.load_imaging_data(
+            self, filepath=processed_data_filename,
+            force_recompute=self._force_recompute)
     
     def save_metadata(
         self,
@@ -425,7 +437,7 @@ class Roi:
         """
         return f"({len(self.roi)}, {[n for n in self.roi[0].shape]})"
 
-    def __getitem__(self, sweep_index: int) -> SweepCA3 or SweepBLA:
+    def __getitem__(self, sweep_index: int) -> SweepCA3 | SweepBLA:
 
         if sweep_index not in self.sweep_list:
             raise IndexError(f'Sweep {sweep_index} not in {self.sweep_list}')
@@ -433,7 +445,7 @@ class Roi:
         return self.get_sweep(sweep_index)
 
     @cache
-    def get_sweep(self, sweep_index: int) -> SweepCA3 or SweepBLA:
+    def get_sweep(self, sweep_index: int) -> SweepCA3 | SweepBLA:
         """
         Retrieve a cached instance of the sweep object for the specified index.
 
@@ -557,9 +569,9 @@ class Sweep:
 
     def save(
             self,
-            output_file: Union[str, Path] = None,
+            output_file: str | Path = None,
             timestamps: bool = False,
-            norm: Union[list, tuple, np.ndarray] = None
+            norm: list | tuple | np.ndarray = None
     ) -> None:
         """
         Save the sweep data as a video file.
@@ -567,7 +579,7 @@ class Sweep:
 
         Parameters
         ----------
-        output_file : str or Path, optional
+        output_file : str | Path, optional
             Path to save the video file.
             If None, saves with the sweep's filename.
         timestamps : bool, optional
@@ -826,9 +838,9 @@ class Channel:
 
     def save(
             self,
-            output_file: Union[str, Path] = None,
+            output_file: str | Path = None,
             timestamps: bool = False,
-            norm: Union[list, tuple, np.ndarray] = None
+            norm: list | tuple | np.ndarray = None
     ) -> None:
         """
         Save the frame sequence of the channel as a video file.
@@ -836,7 +848,7 @@ class Channel:
 
         Parameters
         ----------
-        output_file : str or Path
+        output_file : str | Path
             Path to save the video file.
         timestamps : bool, optional
             If True, includes elapsed time on the frames. Default is False.
@@ -930,7 +942,7 @@ class Frame:
 
     def __init__(
             self,
-            frame_index: int or str,
+            frame_index: int | str,
             roi_metadata: dict,
             frame_data: np.ndarray
     ) -> None:
@@ -939,7 +951,7 @@ class Frame:
 
         Parameters
         ----------
-        frame_index : int or str
+        frame_index : int | str
             Index or identifier for the frame.
         roi_metadata : dict
             Metadata dictionary containing information about the ROI, channel,
@@ -963,7 +975,7 @@ class Frame:
             self,
             ax: plt.Axes = None,
             cmap: str = None,
-            norm: list or tuple or np.ndarray = None,
+            norm: list | tuple | np.ndarray = None,
             show_cmap_bar: bool = False,
             hide_xticks: bool = False,
             hide_yticks: bool = False,
@@ -1011,9 +1023,9 @@ class Frame:
 
     def save(
             self,
-            output_file: str or Path = None,  # type: ignore
+            output_file: str | Path = None,  # type: ignore
             data_type: str = None,
-            norm: tuple or list or np.ndarray = None
+            norm: tuple | list | np.ndarray = None
     ) -> None:
         """
         Save the frame as a `.tif` file.
@@ -1040,7 +1052,7 @@ class Frame:
         print(f'Saved! at {output_file}')
 
         if not data_type:
-            data_type = self.data_type
+            data_type = self.dtype
 
         return save_single_frame(
             frame=self.frame,

@@ -21,7 +21,7 @@ class ImagingDatasetConfig:
     
     def __init__(
         self,
-        config_path: str or Path = None,
+        config_path: str | Path = None,
         kernel_size_um: tuple = None,
         pmt_artifact_detection_threshold: int = None,
         **overrides
@@ -63,7 +63,7 @@ class ImagingDatasetConfig:
     
     def _load_config(
             self,
-            config_path: str or Path = None
+            config_path: str | Path = None
     ) -> dict:
         """Load configuration from YAML file."""
         

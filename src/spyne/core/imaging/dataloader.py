@@ -52,7 +52,11 @@ class ImagingDataLoader:
         """
         if not folder.exists() or not folder.is_dir():
             raise ValueError(f"Invalid dataset folder: {folder}")
-        
+
+        # Normalize: step up if the user passed the 'raw' subfolder directly
+        if folder.name.lower() == ImagingDataPaths.RAW_FOLDER.name.lower():
+            folder = folder.parent
+
         self.folder = folder
         
         # Initialize file lists
@@ -138,7 +142,8 @@ class ImagingDataLoader:
     def load_metadata(
         self,
         dataset_instance,
-        filepath: str or Path = None,
+        filepath: str | Path = None,
+        force_recompute: bool = False
     ) -> tuple:
         """
         Load metadata for all ROIs.
@@ -150,6 +155,9 @@ class ImagingDataLoader:
         filepath : str or Path
             Filename for saved metadata. Default is "metadata.h5". 
             If None, attempts to load from default location.
+        force_recompute : bool, optional
+            If True, skip loading from saved file and recompute from raw data.
+            Default is False.
             
         Returns
         -------
@@ -169,8 +177,8 @@ class ImagingDataLoader:
         
         filepath = Path(filepath)
 
-        # Try to load from saved file first
-        if filepath.exists():
+        # Try to load from saved file first (unless force_recompute is True)
+        if not force_recompute and filepath.exists():
             try:
                 saved_data = fl.load(filepath)
                 
@@ -199,7 +207,8 @@ class ImagingDataLoader:
     def load_imaging_data(
         self,
         dataset_instance,
-        filepath: str or Path = None
+        filepath: str or Path = None,
+        force_recompute: bool = False
     ) -> list:
         """
         Load and process imaging data.
@@ -208,9 +217,12 @@ class ImagingDataLoader:
         ----------
         dataset_instance
             ImagingDataset instance (needed for compatibility).
-        filepath : str or Path, optional
+        filepath : str | Path, optional
             Filepath for processed data. Default is "processed_imaging.h5". 
             If None, attempts to load from default location.
+        force_recompute : bool, optional
+            If True, skip loading from saved file and recompute from raw data.
+            Default is False.
             
         Returns
         -------
@@ -225,7 +237,7 @@ class ImagingDataLoader:
 
         filepath = Path(filepath)
 
-        if filepath.exists():
+        if not force_recompute and filepath.exists():
             try:
                 preprocessed_data = fl.load(filepath)
 
@@ -262,7 +274,7 @@ class ImagingDataLoader:
         ----------
         metadata : list
             List of metadata dictionaries.
-        output_path : str or Path
+        output_path : str | Path
             Output file path.
         overwrite : bool, optional
             Whether to overwrite existing files. Default is False.
@@ -292,7 +304,7 @@ class ImagingDataLoader:
         self,
         data: list,
         processing_params: dict,
-        output_path: str or Path,
+        output_path: str | Path,
         overwrite: bool = False
     ) -> Path:
         """
@@ -304,7 +316,7 @@ class ImagingDataLoader:
             List of processed data arrays.
         processing_params : dict
             Parameters used for processing.
-        output_path : str or Path, optional
+        output_path : str | Path, optional
             Output file path. If None, uses default location.
         overwrite : bool, optional
             Whether to overwrite existing files. Default is False.

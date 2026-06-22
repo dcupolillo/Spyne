@@ -25,6 +25,8 @@ def create_file_to_roi_map(
 ) -> dict:
     """
     Create a mapping from file paths to ROI indices.
+    This will tell from which file ROIs are extracted, 
+    which is necessary for metadata lookup.
 
     Parameters
     ----------
@@ -59,7 +61,7 @@ def create_file_to_roi_map(
         if not roi_indices:
             raise ValueError(
                 f"No metadata found for z-index {z_index}",
-                "(z-value {z_value})")
+                f"(z-value {z_value})")
 
         file_to_roi_map[file_path] = roi_indices
 
