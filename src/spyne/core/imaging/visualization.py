@@ -7,10 +7,11 @@
     Data persistence functions have been moved to dataloader.py for better
     separation of concerns.
     """
-
+from __future__ import annotations
 from pathlib import Path
 import cv2
 import numpy as np
+
 
 
 def animate_frames(
@@ -133,7 +134,7 @@ def animate_frames(
 def save_frames(
     frames: np.ndarray,
     frame_rate: float,
-    output_file: str or Path,
+    output_file: str | Path,
     active_channels: list,
     timestamps: bool,
     norm: list or tuple or np.ndarray = None
@@ -251,7 +252,7 @@ def save_single_frame(
     frame: np.ndarray,
     output_file: str,
     data_type: str,
-    norm: tuple or list or np.ndarray = None
+    norm: tuple | list | np.ndarray = None
 ) -> None:
     """
     Save a single frame as a normalized image file.
@@ -342,4 +343,4 @@ def save_single_frame(
             cv2.NORM_MINMAX,
             dtype=cv2.CV_8U)
 
-    cv2.imwrite(output_file, frame_normalized)
+    cv2.imwrite(str(output_file), frame_normalized)
