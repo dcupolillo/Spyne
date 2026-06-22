@@ -1,6 +1,7 @@
 """ Created on Tue Sep 23 13:12:00 2025
     @author: dcupolillo """
 
+from __future__ import annotations
 import numpy as np
 import pyabf
 from scipy.optimize import curve_fit
@@ -8,9 +9,9 @@ from ipfx.feature_extractor import SpikeFeatureExtractor
 
 
 def ohm_law(
-        voltage: float = None,
-        resistance: float = None,
-        current: float = None
+        voltage: float | None = None,
+        resistance: float | None = None,
+        current: float | None = None
 ) -> float:
     """
     Calculate voltage, current, or resistance using Ohm's Law.
