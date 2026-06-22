@@ -1,0 +1,97 @@
+# Configuration for SpineDataset
+# Created on January 21, 2026
+# @author: dcupolillo
+# Default paths and parameters for spine segmentation and analysis
+
+
+# ------------------------------------------------------------------
+# Model paths and descriptions of ML models used in the pipeline
+# ------------------------------------------------------------------
+
+models:
+  care_denoising:
+    model_path: ../../inference_models/care/weights_best.h5
+    description: CARE model for image denoising before segmentation
+  deepd3_segmentation:
+    path: ../../inference_models/deepd3/model_250414_trial18.h5
+    description: DeepD3 segmentation model for spine and dendrite detection
+  nnunet_segmentation:
+    path: ../../inference_models/nnunet/checkpoint_final.pth
+    description: nnU-Net segmentation model for spine and dendrite detection
+  calcium_event_classifier:
+    path: ../../inference_models/calcium_event_classifier/251118_model_dff.pth
+    description: Calcium event classifier for detecting activity events
+
+
+# ------------------------------------------------------------------
+# Denoising parameters and descriptions for the CARE model
+# ------------------------------------------------------------------
+
+denoising:
+  supported_algorithms: [care]
+  denoising_algorithm: care
+
+  care_parameters:
+    enabled: True
+    care_python_executable: C:/Users/dcupolillo/AppData/Local/anaconda3/envs/csbdeep/python.exe
+    axes: "YX"
+    description: CARE denoising is applied before segmentation to improve image quality
+
+
+# ------------------------------------------------------------------
+# Specific segmentation parameters
+# ------------------------------------------------------------------
+
+segmentation:
+  supported_algorithms: [deepd3, nnunet]
+  segmentation_algorithm: deepd3 
+  
+  # Algorithm-specific inference parameters
+  deepd3_parameters:
+    deepd3_python_executable: C:/Users/dcupolillo/AppData/Local/anaconda3/envs/deepd3/python.exe
+    device: /GPU:0 # TensorFlow device string for GPU inference (e.g., "/GPU:0")
+    spine_threshold: 0.3
+    dendrite_threshold: 0.7
+
+  nnunet_parameters:
+    nnunet_python_executable: C:/Users/dcupolillo/AppData/Local/anaconda3/envs/respan/python.exe
+    device: cuda:0 # PyTorch device string for GPU inference (e.g., "cuda:0")
+    dataset_id: "100"
+    dataset_name: "SpineSegmentation"
+    configuration: "2d"
+  
+  # Shared post-processing parameters (applied after inference)
+  post_processing_parameters:
+    mask_size: 3
+    min_distance: 5
+    min_spine_size: 4.0
+    min_dendrite_size: 15.0
+    dendrite_dilation_iterations: 12
+
+
+# ------------------------------------------------------------------
+# Parameters for background subtraction in dF/F0 calculation
+# ------------------------------------------------------------------
+
+background_subtraction:
+  background_dilation_disk_size: 6
+  neuropil_factor: 0.7
+  description: Parameters for background subtraction in fluorescence signal extraction
+
+
+# ------------------------------------------------------------------
+# Parameters for timeseries extraction and dF/F calculation
+# ------------------------------------------------------------------
+
+timeseries:
+  description: Parameters for dF/F calculation and timeseries extraction
+
+  # dF/F0 calculation parameters
+  rolling_bsl_methods: [centered, left, right]
+  rolling_bsl: centered # Rolling baseline method ('centered', 'left', 'right')
+  window_sec: 0.5 # Window size in seconds for rolling baseline calculation
+  min_quantile: 10 # Minimum quantile for baseline calculation
+  
+  # Zscore calculation parameters
+  baseline_percentile: 25.0 # Percentile threshold for robust z-score baseline estimation
+  
