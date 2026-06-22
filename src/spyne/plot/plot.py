@@ -1,6 +1,7 @@
 """ Created on Tue Aug 8 13:23:29 2025
     @author: dcupolillo """
 
+from __future__ import annotations
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -9,6 +10,7 @@ from matplotlib.gridspec import GridSpec
 from matplotlib.transforms import Affine2D
 from scipy.stats import sem
 from spyne.core.imaging.imagingdataset import Roi
+from spyne.core.spines.spinedataset import RoiSpine
 from spyne.core.spines.analysis.spatial_distances import euclidean_distance
 
 
@@ -196,6 +198,9 @@ def scatter(
         scan_angle: bool = False,
         projection: str = '2d',
         ax: plt.Axes = None,
+        flip_yz: bool = False,
+        azim: float = 30,
+        elev: float = 30,
         **kwargs,
 ) -> None:
     """
@@ -270,9 +275,12 @@ def scatter(
     else:
         ax.scatter(
             all_centroids[:, 0],  # xs of all centroids
-            all_centroids[:, 1],  # ys of all centroids
-            all_centroids[:, 2],  # zs of all centroids
+            all_centroids[:, 1] if not flip_yz else all_centroids[:, 2],  # ys of all centroids
+            all_centroids[:, 2] if not flip_yz else all_centroids[:, 1],  # zs of all centroids
             **kwargs)
+        
+        if azim is not None:
+            ax.view_init(elev=elev, azim=azim)
 
 
 def scatter_events(
@@ -286,7 +294,7 @@ def scatter_events(
         show_cbar: bool = True,
         cbar_kwargs: dict = None,
         **kwargs
-) -> None or tuple:
+) -> None | tuple:
     """
     Plot active spines with event-based coloring.
 
@@ -419,12 +427,12 @@ def scatter_events(
 
 
 def masks(
-        roi_spine,
+        roi_spine: RoiSpine,
         spines_cmap: str = 'gist_rainbow',
         spine_mask_alpha: float = 0.5,
         enum: bool = True,
         ax: plt.Axes = None,
-        output_filename: str or Path = None,
+        output_filename: str | Path = None,
         imshow_kwargs: dict = None,
         scatter_kwargs: dict = None,
         text_kwargs: dict = None,
@@ -788,6 +796,10 @@ def heatmap(
     - The function is flexible for both types.
     """
 
+    # Convert to numpy if list is provided
+    data = np.array(data)
+    ts = np.array(ts)
+
     if binary is not None:
         spine_sweep_indices = np.argwhere(binary == select_binary)
         data = data[spine_sweep_indices[:, 0], spine_sweep_indices[:, 1], :]
@@ -913,12 +925,18 @@ def tile(
             "All elements in roi_list must be"
             "instances of spyne.core.imagingdataset.Roi")
 
+    # if vmin and vmax not provided in kwargs, set them to default values
+    vmin = kwargs.get("vmin", np.min([roi[0].ch2.maxproj.frame.min() for roi in roi_list]))
+    vmax = kwargs.get("vmax", np.max([roi[0].ch2.maxproj.frame.max() for roi in roi_list]))
+
     if ax is None:
         _, ax = plt.subplots()
 
     default_kwargs = {
         "cmap": "binary_r",
         "alpha": 0.5,
+        "vmin": vmin,
+        "vmax": vmax
     }
     # Merge default kwargs with user-supplied kwargs (user overrides default)
     imshow_kwargs = {**default_kwargs, **kwargs}
