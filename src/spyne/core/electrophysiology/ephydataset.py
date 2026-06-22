@@ -8,12 +8,18 @@ from tqdm import tqdm
 import numpy as np
 from functools import cache
 import tensorflow as tf
+from spyne.core.electrophysiology.config import EphyDatasetConfig
 from spyne.core.electrophysiology.load import (
     load_metadata_from_abf, load_data_from_abf, find_test_pulse_window)
 from spyne.core.electrophysiology.io import save_metadata
 from spyne.core.electrophysiology.analysis.pyabf_passive_props import (
     analyze_I_steps, unpack_spike_dfs, passive_properties)
-from spyne.core.electrophysiology.analysis.synaptic_events import BLA_EPSCs
+from spyne.core.electrophysiology.analysis.synaptic_events import (
+    BLA_EPSCs,
+    CA3_EPSCs,
+    detect_all_events,
+    sEPSCs,
+)
 from spyne.core.imaging.imagingdataset import ImagingDataset
 
 
@@ -28,7 +34,23 @@ class EphyDataset:
     def __init__(
             self,
             dataset: ImagingDataset,
-            model_fn: str or Path = r"C:\Users\dcupolillo\Projects\miniML\models\transfer_learning\NMJ_wt\lstm_transfer.h5",
+            model_fn: str | Path = None,
+            recording_channel: int = None,
+            scaling: float = None,
+            unit: str = None,
+            win_size: int = None,
+            direction: str = None,
+            bla_epoch_idx: int = None,
+            ca3_epoch_idx: int = None,
+            model_threshold: float = None,
+            batch_size: int = None,
+            peak_w: float = None,
+            rel_prom_cutoff: float = None,
+            convolve_window: int = None,
+            gradient_convolve_window: int = None,
+            resample_to_600: bool = None,
+            _force_recompute: bool = False,
+            **config_overrides
     ) -> None:
         """
         Initialize the EphyDataset with an ImagingDataset instance.
@@ -37,6 +59,10 @@ class EphyDataset:
         ----------
         dataset : ImagingDataset
             An instance of ImagingDataset containing imaging data and metadata.
+        model_fn : str | Path, optional
+            Path to the miniML event detection model. Overrides config value.
+        _force_recompute : bool, optional
+            If True, forces recomputation of all data, ignoring cached results.
 
         Raises
         ------
@@ -50,6 +76,27 @@ class EphyDataset:
             raise TypeError('Invalid input type for dataset')
 
         self._dataset = dataset
+        self._force_recompute = _force_recompute
+
+        # Initialize configuration
+        self.config = EphyDatasetConfig(
+            model_fn=model_fn,
+            recording_channel=recording_channel,
+            scaling=scaling,
+            unit=unit,
+            win_size=win_size,
+            direction=direction,
+            bla_epoch_idx=bla_epoch_idx,
+            ca3_epoch_idx=ca3_epoch_idx,
+            model_threshold=model_threshold,
+            batch_size=batch_size,
+            peak_w=peak_w,
+            rel_prom_cutoff=rel_prom_cutoff,
+            convolve_window=convolve_window,
+            gradient_convolve_window=gradient_convolve_window,
+            resample_to_600=resample_to_600,
+            **config_overrides)
+
         self.abf_file_list = self._dataset.abf_file_list
 
         _I_step_folder = self._dataset.folder / "raw"
@@ -132,6 +179,14 @@ class EphyDataset:
             "tau_sec": "analysis/electrophysiology/tau_sec.h5",
             "BLA_EPSCs": "analysis/electrophysiology/BLA_EPSCs.h5",
             "BLA_EPSCs_x": "analysis/electrophysiology/BLA_EPSCs_x.h5",
+            "BLA_amplitudes": "analysis/electrophysiology/BLA_amplitudes.h5",
+            "CA3_EPSCs": "analysis/electrophysiology/CA3_EPSCs.h5",
+            "CA3_EPSCs_x": "analysis/electrophysiology/CA3_EPSCs_x.h5",
+            "CA3_amplitudes": "analysis/electrophysiology/CA3_amplitudes.h5",
+            "sEPSCs": "analysis/electrophysiology/sEPSCs.h5",
+            "sEPSCs_x": "analysis/electrophysiology/sEPSCs_x.h5",
+            "sEPSC_amplitudes": "analysis/electrophysiology/sEPSC_amplitudes.h5",
+            "sEPSC_counts": "analysis/electrophysiology/sEPSC_counts.h5",
         }
     
     def _load_file(
@@ -394,8 +449,117 @@ class EphyDataset:
 
         self._collect_timeseries(save, save_path=output_folder)
         self._collect_passive_properties(save, save_path=output_folder)
-        self._collect_BLA_EPSCs(save, save_path=output_folder)
+        self._collect_synaptic_events(save, save_path=output_folder)
         self._collect_Isteps(save, save_path=output_folder)
+
+    def _collect_synaptic_events(
+            self,
+            save: bool,
+            save_path: str or Path = None
+    ) -> None:
+        """Collect BLA, CA3, and spontaneous EPSCs from one detection pass.
+
+        For each ABF file, `detect_all_events` is run only once. BLA-evoked,
+        CA3-evoked, and spontaneous events are then extracted from the same
+        precomputed event list.
+        """
+
+        n_files = len(self.abf_file_list)
+
+        self.BLA_EPSCs = np.empty(n_files, dtype=object)
+        self.BLA_EPSCs_x = np.empty(n_files, dtype=object)
+        self.BLA_amplitudes = np.empty(n_files, dtype=object)
+
+        self.CA3_EPSCs = np.empty(n_files, dtype=object)
+        self.CA3_EPSCs_x = np.empty(n_files, dtype=object)
+        self.CA3_amplitudes = np.empty(n_files, dtype=object)
+
+        self.sEPSCs = np.empty(n_files, dtype=object)
+        self.sEPSCs_x = np.empty(n_files, dtype=object)
+        self.sEPSC_amplitudes = np.empty(n_files, dtype=object)
+        self.sEPSC_counts = np.empty(n_files, dtype=object)
+
+        model = tf.keras.models.load_model(self.model_fn)
+
+        for n, file_path in tqdm(
+                enumerate(self.abf_file_list),
+                desc="Collecting synaptic events",
+                total=n_files):
+
+            all_events = detect_all_events(self, file_path, model=model)
+
+            (bla_events, bla_events_x, bla_amplitudes, _, _, _, _, _, _, _,
+             _, _, _, _, _, _) = BLA_EPSCs(
+                self,
+                file_path,
+                all_events=all_events)
+
+            (ca3_events, ca3_events_x, ca3_amplitudes, _, _, _, _, _, _, _,
+             _, _, _, _, _, _) = CA3_EPSCs(
+                self,
+                file_path,
+                all_events=all_events)
+
+            spontaneous_by_sweep = sEPSCs(
+                self,
+                file_path,
+                all_events=all_events)
+
+            self.BLA_EPSCs[n] = bla_events
+            self.BLA_EPSCs_x[n] = bla_events_x
+            self.BLA_amplitudes[n] = bla_amplitudes
+
+            self.CA3_EPSCs[n] = ca3_events
+            self.CA3_EPSCs_x[n] = ca3_events_x
+            self.CA3_amplitudes[n] = ca3_amplitudes
+
+            n_sweeps = len(spontaneous_by_sweep)
+            file_events = np.empty(n_sweeps, dtype=object)
+            file_events_x = np.empty(n_sweeps, dtype=object)
+            file_amplitudes = np.empty(n_sweeps, dtype=object)
+            file_counts = np.zeros(n_sweeps, dtype=int)
+
+            for sweep_n, sweep_events in enumerate(spontaneous_by_sweep):
+                file_events[sweep_n] = sweep_events["events"]
+                file_events_x[sweep_n] = sweep_events["events_x"]
+                file_amplitudes[sweep_n] = sweep_events["amplitudes"]
+                file_counts[sweep_n] = sweep_events["events"].shape[0]
+
+            self.sEPSCs[n] = file_events
+            self.sEPSCs_x[n] = file_events_x
+            self.sEPSC_amplitudes[n] = file_amplitudes
+            self.sEPSC_counts[n] = file_counts
+
+        self.BLA_EPSCs = np.stack(self.BLA_EPSCs, axis=0)
+        self.BLA_EPSCs_x = np.stack(self.BLA_EPSCs_x, axis=0)
+        self.BLA_amplitudes = np.stack(self.BLA_amplitudes, axis=0)
+
+        self.CA3_EPSCs = np.stack(self.CA3_EPSCs, axis=0)
+        self.CA3_EPSCs_x = np.stack(self.CA3_EPSCs_x, axis=0)
+        self.CA3_amplitudes = np.stack(self.CA3_amplitudes, axis=0)
+
+        if save:
+            saving_folder = (
+                self._dataset.folder / "analysis" / "electrophysiology"
+                if save_path is None else save_path)
+            saving_folder = Path(saving_folder)
+            saving_folder.mkdir(parents=True, exist_ok=True)
+
+            data_to_save = {
+                "BLA_EPSCs": self.BLA_EPSCs,
+                "BLA_EPSCs_x": self.BLA_EPSCs_x,
+                "BLA_amplitudes": self.BLA_amplitudes,
+                "CA3_EPSCs": self.CA3_EPSCs,
+                "CA3_EPSCs_x": self.CA3_EPSCs_x,
+                "CA3_amplitudes": self.CA3_amplitudes,
+                "sEPSCs": self.sEPSCs,
+                "sEPSCs_x": self.sEPSCs_x,
+                "sEPSC_amplitudes": self.sEPSC_amplitudes,
+                "sEPSC_counts": self.sEPSC_counts,
+            }
+
+            for key, value in data_to_save.items():
+                fl.save(saving_folder / f"{key}.h5", value)
 
     def _collect_timeseries(
             self,
@@ -491,52 +655,9 @@ class EphyDataset:
             save: bool,
             save_path: str or Path = None
     ) -> None:
-        """
-        This method processes each ABF file to detect BLA EPSCs
-        using the BLA_EPSCs function from the analysis module.
-        
-        It stores the detected events and their properties in arrays
-        and optionally saves them as .npy files.
-        """
+        """Backward-compatible wrapper for unified synaptic collection."""
 
-        self.BLA_EPSCs = np.empty(len(self.abf_file_list), dtype=object)
-        self.BLA_EPSCs_x = np.empty(len(self.abf_file_list), dtype=object)
-        self.BLA_amplitudes = np.empty(len(self.abf_file_list), dtype=object)
-
-        model = tf.keras.models.load_model(self.model_fn)
-
-        for n, file_path in tqdm(enumerate(self.abf_file_list),
-                desc="Collecting BLA EPSCs",
-                total=len(self.abf_file_list)):
-
-            (events, events_x, amplitudes, event_peak_values, peak_x,
-             bsls_start_x, bsls_end_x, scores, tau, charges, risetimes,
-             rise_min_x, rise_max_x, slopes, decaytimes, halfwidths
-            ) = BLA_EPSCs(self, file_path, model=model)
-
-            self.BLA_EPSCs[n] = events
-            self.BLA_EPSCs_x[n] = events_x
-            self.BLA_amplitudes[n] = amplitudes
-
-        self.BLA_EPSCs = np.stack(self.BLA_EPSCs, axis=0)
-        self.BLA_EPSCs_x = np.stack(self.BLA_EPSCs_x, axis=0)
-        self.BLA_amplitudes = np.stack(self.BLA_amplitudes, axis=0)
-
-        if save:
-            saving_folder = (
-                self._dataset.folder / "analysis" / "electrophysiology"
-                if save_path is None else save_path)
-            saving_folder = Path(saving_folder)
-            saving_folder.mkdir(parents=True, exist_ok=True)
-            
-            data_to_save = {
-                "BLA_EPSCs": self.BLA_EPSCs,
-                "BLA_EPSCs_x": self.BLA_EPSCs_x,
-                "BLA_amplitudes": self.BLA_amplitudes,
-            }
-            
-            for key, value in data_to_save.items():
-                fl.save(saving_folder / f"{key}.h5", value)
+        self._collect_synaptic_events(save=save, save_path=save_path)
 
     def _collect_Isteps(
             self,
@@ -584,6 +705,15 @@ class EphyDataset:
             
             for key, value in data_to_save.items():
                 fl.save(saving_folder / f"{key}.h5", value)
+
+    def _collect_sEPSCs(
+            self,
+            save: bool,
+            save_path: str or Path = None
+    ) -> None:
+        """Backward-compatible wrapper for unified synaptic collection."""
+
+        self._collect_synaptic_events(save=save, save_path=save_path)
 
     def __getitem__(self, roi_index: int) -> None:
         if roi_index not in self._dataset.roi_list:

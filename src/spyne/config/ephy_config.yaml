@@ -1,0 +1,42 @@
+# Configuration for EphyDataset
+# Created on February 24, 2026
+# @author: dcupolillo
+
+# ==============================================================================
+# Model
+# ==============================================================================
+model:
+  # Path to the miniML event detection model
+  path: "C:/Users/dcupolillo/Projects/miniML/models/transfer_learning/NMJ_wt/lstm_transfer.h5"
+
+# ==============================================================================
+# Detection Parameters
+# ==============================================================================
+detection:
+  # Recording channel index to analyze
+  channel: 0
+
+  # Scaling factor applied to the raw trace
+  scaling: 1
+
+  # Physical unit of the recorded signal
+  unit: "pA"
+
+  # miniML sliding window size in samples
+  win_size: 3600
+
+  # Direction of events to detect ('negative' or 'positive')
+  direction: "negative"
+
+  # Epoch indices in the ABF protocol for evoked windows
+  bla_epoch_idx: 5
+  ca3_epoch_idx: 6
+
+  # miniML internal detection parameters
+  model_threshold: 0.5
+  batch_size: 512
+  peak_w: 5
+  rel_prom_cutoff: 0.25
+  convolve_win: 20
+  gradient_convolve_win: 40
+  resample_to_600: true
