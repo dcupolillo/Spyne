@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+title: Spyne
+message: "If you use this software, please cite it as below."
+type: software
+
+authors:
+  - family-names: Cupolillo
+    given-names: Dario
+    orcid: "https://orcid.org/0000-0002-1517-3815"
+
+repository-code: "https://github.com/dcupolillo/Spyne"
+
+version: 1.0.1
+license: GPL-3.0
