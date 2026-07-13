@@ -1,5 +1,5 @@
 # Spyne
-[![DOI](https://sandbox.zenodo.org/badge/917193480.svg)](https://handle.test.datacite.org/10.5072/zenodo.519053)
+[![DOI](https://zenodo.org/badge/917193480.svg)](https://doi.org/10.5281/zenodo.21334656)
 
 ## Description
 
